@@ -89,13 +89,6 @@ def get_fresh_tokens(email: str, password: str) -> dict:
             except Exception as e:
                 logger.warning("Could not enumerate buttons: %s", e)
 
-            # Also log the page HTML around the form (first 3000 chars)
-            try:
-                html = page.content()
-                logger.info("Page HTML snippet:\n%s", html[:3000])
-            except Exception:
-                pass
-
             # Wait for the submit button to be visible and click it
             submitted = False
             for btn_sel in [
