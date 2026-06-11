@@ -71,6 +71,9 @@ def get_fresh_tokens(email: str, password: str) -> dict:
                 "button:has-text('Sign In')",
                 "button:has-text('Log In')",
                 "button:has-text('Continue')",
+                "button:has-text('Zaloguj')",
+                "button:has-text('Dalej')",
+                "button:has-text('Next')",
             ]:
                 try:
                     if page.locator(btn_sel).count() > 0:
@@ -80,6 +83,29 @@ def get_fresh_tokens(email: str, password: str) -> dict:
                         break
                 except Exception:
                     continue
+
+            if not submitted:
+                # Try pressing Enter on the password field
+                try:
+                    page.press(pass_sel, "Enter")
+                    logger.info("Submitted form via Enter key")
+                    submitted = True
+                except Exception:
+                    pass
+
+            if not submitted:
+                # Last resort — click the first visible button on the page
+                try:
+                    buttons = page.locator("button").all()
+                    logger.info("Buttons found on page: %d", len(buttons))
+                    for btn in buttons:
+                        if btn.is_visible():
+                            logger.info("Clicking visible button: %s", btn.inner_text())
+                            btn.click()
+                            submitted = True
+                            break
+                except Exception as e:
+                    logger.warning("Last-resort button click failed: %s", e)
 
             if not submitted:
                 page.screenshot(path="login_debug_nobutton.png")
