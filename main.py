@@ -20,6 +20,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     level=logging.INFO,
 )
+# Suppress httpx request logs — they contain the bot token in the URL
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 GARMIN_EMAIL = os.environ["GARMIN_EMAIL"]
