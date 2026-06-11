@@ -12,6 +12,17 @@ TOKEN_FILE = os.path.join(_DATA_DIR, "garmin_tokens.json")
 CONNECT_URL = "https://connect.garmin.com/modern/"
 
 
+def _screenshot(page, name: str) -> str:
+    """Save a screenshot to DATA_DIR and return the path."""
+    path = os.path.join(_DATA_DIR, name)
+    try:
+        page.screenshot(path=path)
+        logger.info("Screenshot saved: %s", path)
+    except Exception as e:
+        logger.warning("Could not save screenshot %s: %s", path, e)
+    return path
+
+
 def get_fresh_tokens(email: str, password: str) -> dict:
     from playwright.sync_api import TimeoutError as PWTimeout
     from playwright.sync_api import sync_playwright
@@ -57,11 +68,36 @@ def get_fresh_tokens(email: str, password: str) -> dict:
             page.click(pass_sel)
             page.type(pass_sel, password, delay=50)
 
-            # Take screenshot to debug if needed
-            page.screenshot(path="login_debug.png")
-            logger.info("Screenshot saved to login_debug.png")
+            # Screenshot before submit — saved to DATA_DIR (persists on Railway volume)
+            _screenshot(page, "login_debug.png")
 
-            # Try multiple submit button patterns
+            # Log every button on the page so we know what's available
+            try:
+                all_buttons = page.locator("button").all()
+                logger.info("Buttons on page (%d):", len(all_buttons))
+                for i, btn in enumerate(all_buttons):
+                    try:
+                        logger.info(
+                            "  [%d] visible=%s text=%r type=%r id=%r",
+                            i,
+                            btn.is_visible(),
+                            btn.inner_text(),
+                            btn.get_attribute("type"),
+                            btn.get_attribute("id"),
+                        )
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.warning("Could not enumerate buttons: %s", e)
+
+            # Also log the page HTML around the form (first 3000 chars)
+            try:
+                html = page.content()
+                logger.info("Page HTML snippet:\n%s", html[:3000])
+            except Exception:
+                pass
+
+            # Wait for the submit button to be visible and click it
             submitted = False
             for btn_sel in [
                 "#login-btn-signin",
@@ -76,31 +112,22 @@ def get_fresh_tokens(email: str, password: str) -> dict:
                 "button:has-text('Next')",
             ]:
                 try:
-                    if page.locator(btn_sel).count() > 0:
-                        page.click(btn_sel)
-                        logger.info("Clicked submit with selector: %s", btn_sel)
-                        submitted = True
-                        break
+                    locator = page.locator(btn_sel)
+                    locator.wait_for(state="visible", timeout=3000)
+                    locator.click()
+                    logger.info("Clicked submit with selector: %s", btn_sel)
+                    submitted = True
+                    break
                 except Exception:
                     continue
-
-            if not submitted:
-                # Try pressing Enter on the password field
-                try:
-                    page.press(pass_sel, "Enter")
-                    logger.info("Submitted form via Enter key")
-                    submitted = True
-                except Exception:
-                    pass
 
             if not submitted:
                 # Last resort — click the first visible button on the page
                 try:
                     buttons = page.locator("button").all()
-                    logger.info("Buttons found on page: %d", len(buttons))
                     for btn in buttons:
                         if btn.is_visible():
-                            logger.info("Clicking visible button: %s", btn.inner_text())
+                            logger.info("Last-resort click: %r", btn.inner_text())
                             btn.click()
                             submitted = True
                             break
@@ -108,11 +135,11 @@ def get_fresh_tokens(email: str, password: str) -> dict:
                     logger.warning("Last-resort button click failed: %s", e)
 
             if not submitted:
-                page.screenshot(path="login_debug_nobutton.png")
+                _screenshot(page, "login_debug_nobutton.png")
                 raise RuntimeError("Could not find submit button")
 
         except PWTimeout:
-            page.screenshot(path="login_debug_timeout.png")
+            _screenshot(page, "login_debug_timeout.png")
             logger.error("Login form not found on: %s", page.url)
             browser.close()
             raise RuntimeError(f"Login form not found at {page.url}")
@@ -122,9 +149,8 @@ def get_fresh_tokens(email: str, password: str) -> dict:
         try:
             page.wait_for_url("**/connect.garmin.com/**", timeout=20000)
         except PWTimeout:
-            page.screenshot(path="login_after_submit.png")
+            _screenshot(page, "login_after_submit.png")
             logger.warning("Did not redirect to connect.garmin.com — current: %s", page.url)
-            logger.warning("Screenshot saved to login_after_submit.png")
 
         page.wait_for_load_state("networkidle", timeout=20000)
         logger.info("Landed on: %s", page.url)

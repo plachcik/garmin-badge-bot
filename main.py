@@ -11,14 +11,10 @@ from message_builder import build_daily_message, build_today_special_message
 
 load_dotenv()
 
-# Ensure persistent data directory exists and is writable (Railway volume at /app/data)
+# Ensure persistent data directory exists
 _DATA_DIR = os.environ.get("DATA_DIR", ".")
 if _DATA_DIR != ".":
     os.makedirs(_DATA_DIR, exist_ok=True)
-    try:
-        os.chmod(_DATA_DIR, 0o777)
-    except OSError:
-        pass
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -169,6 +165,18 @@ def main():
             logger.info("First-time login complete.")
         except Exception as e:
             logger.error("First-time login failed: %s", e)
+            # Send debug screenshot to Telegram so we can see what the login page looked like
+            import asyncio
+            screenshot_path = os.path.join(_DATA_DIR, "login_debug.png")
+            if os.path.exists(screenshot_path):
+                async def _send_screenshot():
+                    await app.bot.send_message(
+                        chat_id=TELEGRAM_CHAT_ID,
+                        text=f"⚠️ Garmin login failed: {e}\n\nScreenshot of login page attached 👇",
+                    )
+                    with open(screenshot_path, "rb") as f:
+                        await app.bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=f)
+                asyncio.get_event_loop().run_until_complete(_send_screenshot())
     try:
         get_session()
     except Exception as e:
