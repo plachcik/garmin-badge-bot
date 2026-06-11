@@ -76,7 +76,8 @@ def get_fresh_tokens(email: str, password: str) -> dict:
                 all_buttons = page.locator("button").all()
                 logger.info("Buttons on page (%d):", len(all_buttons))
                 for i, btn in enumerate(all_buttons):
-                    try:
+                    import contextlib
+                    with contextlib.suppress(Exception):
                         logger.info(
                             "  [%d] visible=%s text=%r type=%r id=%r",
                             i,
@@ -85,8 +86,6 @@ def get_fresh_tokens(email: str, password: str) -> dict:
                             btn.get_attribute("type"),
                             btn.get_attribute("id"),
                         )
-                    except Exception:
-                        pass
             except Exception as e:
                 logger.warning("Could not enumerate buttons: %s", e)
 

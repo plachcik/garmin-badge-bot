@@ -305,3 +305,61 @@ class TestBuildTodaySpecialMessage:
 
     def test_returns_string(self):
         assert isinstance(build_today_special_message([self._badge()]), str)
+
+
+# ---------------------------------------------------------------------------
+# _badge_line — single-day badges (start == end, e.g. July 4th every year)
+# ---------------------------------------------------------------------------
+
+class TestBadgeLineSingleDay:
+    def _single_day_badge(self, month=7, day=4, **kwargs):
+        """Badge where start and end share the same calendar day (different years)."""
+        defaults = {
+            "badgeName": "Single Day Badge",
+            "badgeDifficultyId": 1,
+            "badgeTargetValue": 5000,
+            "badgeUnitId": 1,
+            "badgeStartDate": f"2019-{month:02d}-{day:02d}T00:00:00.0",
+            "badgeEndDate": f"2026-{month:02d}-{day:02d}T23:59:59.0",
+            "badgeAssocType": "none",
+        }
+        defaults.update(kwargs)
+        return defaults
+
+    def test_same_day_start_and_end_month_match(self):
+        badge = self._single_day_badge(month=7, day=4)
+        start = datetime.fromisoformat(badge["badgeStartDate"])
+        end = datetime.fromisoformat(badge["badgeEndDate"])
+        assert start.month == end.month
+        assert start.day == end.day
+
+    def test_single_day_badge_line_rendered(self):
+        badge = self._single_day_badge(month=7, day=4)
+        line = _badge_line(badge)
+        assert "Single Day Badge" in line
+        assert "⏰" in line
+
+    def test_single_day_shows_same_date_twice(self):
+        # start and end are the same calendar day — both should show "4 lipca"
+        badge = self._single_day_badge(month=7, day=4)
+        line = _badge_line(badge)
+        assert line.count("lipca") == 2
+
+    def test_single_day_june(self):
+        badge = self._single_day_badge(month=6, day=11)
+        line = _badge_line(badge)
+        assert "11 czerwca" in line
+
+    def test_today_special_message_uses_tylko_dzis(self):
+        badge = self._single_day_badge()
+        msg = build_today_special_message([badge])
+        assert "Tylko dziś" in msg
+        assert "Zaczyna się" not in msg
+        assert "Zaczął się" not in msg
+
+    def test_today_special_hides_dates(self):
+        # today-special variant never shows the date — just "Tylko dziś!!"
+        badge = self._single_day_badge(month=12, day=25)
+        msg = build_today_special_message([badge])
+        assert "grudnia" not in msg
+        assert "Tylko dziś" in msg

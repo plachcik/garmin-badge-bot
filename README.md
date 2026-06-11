@@ -1,6 +1,6 @@
 # Garmin Badge Bot
 
-A Telegram bot that checks your Garmin Connect badges every day and sends you a digest of newly earned badges and active challenges.
+A Telegram bot that monitors your Garmin Connect badges and sends daily digests of newly earned badges, active weekly challenges, and one-day-only special badges.
 
 ## Setup
 
@@ -34,26 +34,76 @@ python main.py
 ### 5. Deploy to Railway
 
 1. Push to a GitHub repo
-2. Create a new Railway project → Deploy from GitHub
-3. Add the environment variables from `.env` in Railway's Variables tab
-4. Railway will build and run the Dockerfile automatically
+2. Create a new Railway project and link it to GitHub
+3. Add the environment variables below in Railway's Variables tab
+4. Railway builds and runs the Dockerfile automatically
+
+#### Required environment variables
+
+| Variable | Description |
+|---|---|
+| `GARMIN_EMAIL` | Your Garmin Connect login email |
+| `GARMIN_PASSWORD` | Your Garmin Connect password |
+| `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
+| `TELEGRAM_CHAT_ID` | Your Telegram chat/user ID |
+
+#### Optional environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATA_DIR` | `.` | Directory for persistent files (`garmin_tokens.json`, `garmin_state.json`). Set to `/app/data` on Railway with a volume mounted there. |
+| `DAILY_HOUR` | `8` | Hour (UTC) when scheduled checks run |
+| `DAILY_MINUTE` | `0` | Minute when scheduled checks run |
+| `WEEKLY_EVERY_DAY` | `false` | Set to `true` to run the weekly digest every day instead of Mondays only (useful for testing) |
 
 ## Commands
 
 | Command | Description |
-|---------|-------------|
+|---|---|
 | `/start` | Show help and your chat ID |
-| `/check` | Manually trigger a badge check right now |
+| `/odznaki` | Manually trigger both the weekly digest and today-special check |
 
-## Daily digest
+## Scheduled messages
 
-The bot sends a message every day at `DAILY_HOUR:DAILY_MINUTE` UTC containing:
+### Weekly digest — every Monday at 8:00 UTC
+(or every day when `WEEKLY_EVERY_DAY=true`)
 
-- 🎉 **Newly earned badges** since the last check
-- 🎯 **Active challenges** you can still earn, with descriptions and end dates
+Lists all badges whose end date falls within the current week:
+
+```
+👋🏻 Żeby nie umknęło!
+
+Dostępne odznaki w tym tygodniu:
+
+• June Weekend 40K ⭐️⭐️
+  🎯 (jedna aktywność)
+  ⏰ Zaczyna się 12 czerwca a kończy 14 czerwca
+```
+
+### Today-special check — every day at 8:00 UTC
+
+Fires only when there are badges whose start and end date share the same calendar day (e.g. `badgeStartDate: 2019-07-04`, `badgeEndDate: 2026-07-04` fires every July 4th). Silent if none are found.
+
+```
+Żeby nie umknęło 💡
+
+📅 Dostępne odznaki tylko na dziś:
+
+• Independence Run ⭐️
+  🎯 5 km (łącznie)
+  ⏰ Tylko dziś!!
+```
+
+## Development
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest          # run tests
+ruff check .    # lint
+```
 
 ## Notes
 
-- Garmin Connect has no official public API — this uses the unofficial `garminconnect` library
-- The bot stores state in `garmin_state.json` to track which badges it has already seen
-- If Garmin enables 2FA on your account, you may need to generate a one-time token on first run
+- Garmin has no official public API — the bot logs in via a headless Firefox browser (Playwright) and keeps the session cookies in `garmin_tokens.json`
+- State is stored in `garmin_state.json` to track which badges have already been reported
+- On Railway, mount a volume at `/app/data` and set `DATA_DIR=/app/data` so tokens survive redeploys

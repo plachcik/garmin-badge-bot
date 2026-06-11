@@ -168,12 +168,16 @@ def main():
             logger.error("First-time login failed: %s", e)
             # Send debug screenshot to Telegram so we can see what the login page looked like
             import asyncio
+            login_error = e
             screenshot_path = os.path.join(_DATA_DIR, "login_debug.png")
             if os.path.exists(screenshot_path):
                 async def _send_screenshot():
                     await app.bot.send_message(
                         chat_id=TELEGRAM_CHAT_ID,
-                        text=f"⚠️ Garmin login failed: {e}\n\nScreenshot of login page attached 👇",
+                        text=(
+                            f"⚠️ Garmin login failed: {login_error}"
+                            "\n\nScreenshot of login page attached 👇"
+                        ),
                     )
                     with open(screenshot_path, "rb") as f:
                         await app.bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=f)

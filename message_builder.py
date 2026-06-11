@@ -1,4 +1,4 @@
-from datetime import datetime, date
+from datetime import date, datetime
 
 # badgeUnitId → (label, conversion_fn)
 UNIT_MAP = {
