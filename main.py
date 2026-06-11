@@ -11,10 +11,14 @@ from message_builder import build_daily_message, build_today_special_message
 
 load_dotenv()
 
-# Ensure persistent data directory exists (Railway volume at /app/data)
+# Ensure persistent data directory exists and is writable (Railway volume at /app/data)
 _DATA_DIR = os.environ.get("DATA_DIR", ".")
 if _DATA_DIR != ".":
     os.makedirs(_DATA_DIR, exist_ok=True)
+    try:
+        os.chmod(_DATA_DIR, 0o777)
+    except OSError:
+        pass
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
