@@ -28,6 +28,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = int(os.environ["TELEGRAM_CHAT_ID"])
 DAILY_HOUR = int(os.getenv("DAILY_HOUR", "8"))
 DAILY_MINUTE = int(os.getenv("DAILY_MINUTE", "0"))
+WEEKLY_EVERY_DAY = os.getenv("WEEKLY_EVERY_DAY", "false").lower() == "true"
 
 
 async def _send_to_chat(app: Application, text: str):
@@ -126,14 +127,15 @@ def main():
 
     scheduler = AsyncIOScheduler()
 
-    # Weekly digest — every Monday at 8 AM UTC
-    scheduler.add_job(
-        send_weekly_digest,
-        trigger="cron",
-        day_of_week="mon",
-        hour=DAILY_HOUR,
-        minute=DAILY_MINUTE,
-        args=[app],
+    # Weekly digest — every Monday at 8 AM UTC (or every day if WEEKLY_EVERY_DAY=true)
+    weekly_kwargs = {"hour": DAILY_HOUR, "minute": DAILY_MINUTE}
+    if not WEEKLY_EVERY_DAY:
+        weekly_kwargs["day_of_week"] = "mon"
+    scheduler.add_job(send_weekly_digest, trigger="cron", args=[app], **weekly_kwargs)
+    logger.info(
+        "Weekly digest scheduled: %s at %02d:%02d UTC",
+        "every day" if WEEKLY_EVERY_DAY else "Mondays only",
+        DAILY_HOUR, DAILY_MINUTE,
     )
 
     # Today-special check — every day at 8 AM UTC (fires only when there are matches)
@@ -147,9 +149,8 @@ def main():
 
     scheduler.start()
     logger.info(
-        "Scheduler started — weekly digest Mon %02d:%02d UTC, "
-        "today-special check every day %02d:%02d UTC",
-        DAILY_HOUR, DAILY_MINUTE, DAILY_HOUR, DAILY_MINUTE,
+        "Scheduler started — today-special check every day %02d:%02d UTC",
+        DAILY_HOUR, DAILY_MINUTE,
     )
 
     # Pre-load Garmin session on startup — run Playwright login if no token file yet
