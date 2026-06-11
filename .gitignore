@@ -1,0 +1,7 @@
+.env
+garmin_state.json
+garmin_tokens.json
+curl.txt
+__pycache__/
+*.pyc
+.venv/
