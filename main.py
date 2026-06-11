@@ -1,9 +1,10 @@
 import logging
 import os
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from garmin_client import fetch_badge_updates
 from message_builder import build_daily_message
@@ -31,7 +32,9 @@ async def send_daily_digest(app: Application):
         limit = 4000
         while msg:
             chunk, msg = msg[:limit], msg[limit:]
-            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk, parse_mode="MarkdownV2")
+            await app.bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID, text=chunk, parse_mode="MarkdownV2"
+            )
         logger.info("Daily digest sent.")
     except Exception as e:
         logger.error("Failed to send daily digest: %s", e)
@@ -95,10 +98,11 @@ def main():
     logger.info("Scheduler started — daily digest at %02d:%02d UTC", DAILY_HOUR, DAILY_MINUTE)
 
     # Pre-load Garmin session on startup — run Playwright login if no token file yet
-    from garmin_client import get_session, TOKEN_FILE
+    from garmin_client import TOKEN_FILE, get_session
     if not os.path.exists(TOKEN_FILE):
         logger.info("No token file found — running first-time Playwright login...")
         import concurrent.futures
+
         from garmin_auth import get_fresh_tokens
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:

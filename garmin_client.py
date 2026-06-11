@@ -1,7 +1,7 @@
-import logging
 import json
+import logging
 import os
-import re
+
 import requests
 
 logger = logging.getLogger(__name__)
@@ -10,8 +10,6 @@ STATE_FILE = "garmin_state.json"
 TOKEN_FILE = "garmin_tokens.json"
 
 CONNECT_API = "https://connect.garmin.com"
-SSO_BASE = "https://sso.garmin.com/sso"
-CONNECT_MODERN = "https://connect.garmin.com/modern/"
 
 _session: requests.Session | None = None
 _token_data: dict = {}
@@ -55,8 +53,9 @@ def _build_session(token_data: dict) -> requests.Session:
 
 def _refresh_jwt(token_data: dict) -> bool:
     """Use Playwright headless browser (in a thread) to get a fresh session."""
-    import os as _os
     import concurrent.futures
+    import os as _os
+
     from garmin_auth import get_fresh_tokens
     email = _os.getenv("GARMIN_EMAIL")
     password = _os.getenv("GARMIN_PASSWORD")
@@ -78,14 +77,17 @@ def _refresh_jwt(token_data: dict) -> bool:
 def get_session() -> requests.Session:
     global _session, _token_data
 
+    if _session is not None:
+        return _session
+
     if not os.path.exists(TOKEN_FILE):
-        raise RuntimeError("No token file found. Run: python setup_from_curl.py")
+        raise RuntimeError("No token file found. Run: python setup_playwright.py")
 
     with open(TOKEN_FILE) as f:
         _token_data = json.load(f)
 
     if _token_data.get("auth_type") != "web_session":
-        raise RuntimeError("Old token format. Run: python setup_from_curl.py")
+        raise RuntimeError("Old token format. Run: python setup_playwright.py")
 
     _session = _build_session(_token_data)
     logger.info("Garmin: session loaded from %s", TOKEN_FILE)
@@ -121,7 +123,9 @@ def fetch_badge_updates(email: str, password: str) -> dict:
     # --- Earned badges ---
     try:
         earned_raw = _get("/gc-api/badge-service/badge/earned")
-        earned_badges = earned_raw if isinstance(earned_raw, list) else earned_raw.get("badgeList", [])
+        earned_badges = (
+            earned_raw if isinstance(earned_raw, list) else earned_raw.get("badgeList", [])
+        )
     except Exception as e:
         logger.error("Failed to fetch earned badges: %s", e)
         earned_badges = []
@@ -133,7 +137,11 @@ def fetch_badge_updates(email: str, password: str) -> dict:
     # --- Available badges ---
     try:
         challenges_raw = _get("/gc-api/badge-service/badge/available")
-        challenges = challenges_raw if isinstance(challenges_raw, list) else challenges_raw.get("badgeList", [])
+        challenges = (
+            challenges_raw
+            if isinstance(challenges_raw, list)
+            else challenges_raw.get("badgeList", [])
+        )
     except Exception as e:
         logger.warning("Failed to fetch available badges: %s", e)
         challenges = []
@@ -154,7 +162,6 @@ def fetch_badge_updates(email: str, password: str) -> dict:
             continue
 
         end_str = c.get("badgeEndDate")
-        start_str = c.get("badgeStartDate", "")
 
         # Skip badges with no end date
         if not end_str:
@@ -162,7 +169,6 @@ def fetch_badge_updates(email: str, password: str) -> dict:
 
         try:
             end_dt = datetime.fromisoformat(end_str.rstrip("0").rstrip("."))
-            start_dt = datetime.fromisoformat(start_str.rstrip("0").rstrip(".")) if start_str else week_monday
         except Exception:
             continue
 

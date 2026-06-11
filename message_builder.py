@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 # badgeUnitId → (label, conversion_fn)
 UNIT_MAP = {
@@ -104,7 +104,7 @@ def build_daily_message(data: dict) -> str:
             available,
             key=lambda b: b.get("badgeEndDate") or "9999"
         )
-        lines.append(f"*Dostępne odznaki w tym tygodniu:*\n")
+        lines.append("*Dostępne odznaki w tym tygodniu:*\n")
         for b in available_sorted:
             lines.append(_badge_line(b))
 

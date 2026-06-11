@@ -7,15 +7,17 @@ Usage:
 """
 import logging
 import os
+
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 load_dotenv()
 
+from garmin_auth import get_fresh_tokens  # noqa: E402 — must run after load_dotenv()
+
 email = os.environ["GARMIN_EMAIL"]
 password = os.environ["GARMIN_PASSWORD"]
 
-from garmin_auth import get_fresh_tokens
 data = get_fresh_tokens(email, password)
 print("\n✅ Tokens saved!")
 print(f"   JWT: {'✅' if data.get('access_token') else '❌'}")

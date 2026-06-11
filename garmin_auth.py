@@ -11,7 +11,8 @@ CONNECT_URL = "https://connect.garmin.com/modern/"
 
 
 def get_fresh_tokens(email: str, password: str) -> dict:
-    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    from playwright.sync_api import TimeoutError as PWTimeout
+    from playwright.sync_api import sync_playwright
 
     logger.info("Launching headless browser to log in to Garmin Connect...")
 
@@ -40,7 +41,9 @@ def get_fresh_tokens(email: str, password: str) -> dict:
 
         # Fill login form (Garmin SSO page)
         try:
-            email_sel = "#username, input[name='username'], input[type='email'], input[name='email']"
+            email_sel = (
+                "#username, input[name='username'], input[type='email'], input[name='email']"
+            )
             page.wait_for_selector(email_sel, timeout=10000)
             logger.info("Login form found, filling credentials...")
 
@@ -109,10 +112,13 @@ def get_fresh_tokens(email: str, password: str) -> dict:
         page.on("request", handle_request)
 
         # Navigate to badges page to trigger the app to make badge API calls
-        try:
-            page.goto("https://connect.garmin.com/modern/challenges", timeout=20000, wait_until="networkidle")
-        except Exception:
-            pass
+        import contextlib
+        with contextlib.suppress(Exception):
+            page.goto(
+                "https://connect.garmin.com/modern/challenges",
+                timeout=20000,
+                wait_until="networkidle",
+            )
 
         csrf_token = captured.get("csrf")
         if csrf_token:

@@ -1,7 +1,28 @@
+# Secrets & runtime state
 .env
 garmin_state.json
 garmin_tokens.json
-curl.txt
+
+# Debug screenshots produced by garmin_auth.py
+*.png
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 .venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/

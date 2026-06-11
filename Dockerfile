@@ -8,8 +8,12 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install chromium --with-deps
+RUN playwright install firefox --with-deps
 
 COPY . .
+
+# Run as non-root user for security
+RUN useradd -m appuser && chown -R appuser /app
+USER appuser
 
 CMD ["python", "main.py"]

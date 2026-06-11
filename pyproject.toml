@@ -1,0 +1,32 @@
+[project]
+name = "garmin-badge-bot"
+version = "0.1.0"
+description = "Telegram bot that sends daily Garmin Connect badge digests"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "B904",  # raise-without-from-inside-except (we have some intentional bare raises)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["garmin_auth", "garmin_client", "message_builder"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
