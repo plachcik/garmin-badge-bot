@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 
 # badgeUnitId → (label, conversion_fn)
 UNIT_MAP = {
@@ -29,29 +29,21 @@ def _format_target(badge: dict) -> str:
     return str(target)
 
 
-def _format_date(date_str: str | None) -> str:
+_MONTHS_PL = [
+    "", "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca",
+    "lipca", "sierpnia", "września", "października", "listopada", "grudnia",
+]
+
+
+def _format_date_pl(date_str: str | None) -> str:
+    """Return a Polish date string like '12 czerwca'."""
     if not date_str:
         return ""
     try:
         dt = datetime.fromisoformat(date_str)
-        return dt.strftime("%b %d")
+        return f"{dt.day} {_MONTHS_PL[dt.month]}"
     except Exception:
-        return date_str
-
-
-def _days_left(end_str: str | None) -> str:
-    if not end_str:
-        return ""
-    try:
-        end = datetime.fromisoformat(end_str)
-        delta = (end - datetime.now()).days
-        if delta < 0:
-            return "minęło"
-        if delta == 0:
-            return "ostatni dzień!"
-        return f"jeszcze {delta} dni"
-    except Exception:
-        return ""
+        return date_str or ""
 
 
 def _badge_line(badge: dict) -> str:
@@ -59,9 +51,8 @@ def _badge_line(badge: dict) -> str:
     difficulty = DIFFICULTY_STARS.get(badge.get("badgeDifficultyId", 1), "")
     target = _format_target(badge)
     assoc = ASSOC_TYPE_LABEL.get(badge.get("badgeAssocType", ""), "")
-    end = badge.get("badgeEndDate")
-    days = _days_left(end)
-    end_fmt = _format_date(end)
+    start_fmt = _format_date_pl(badge.get("badgeStartDate"))
+    end_fmt = _format_date_pl(badge.get("badgeEndDate"))
 
     # Build "what to do" line
     what = []
@@ -73,11 +64,16 @@ def _badge_line(badge: dict) -> str:
     line = f"• *{_e(name)}* {difficulty}\n"
     if what:
         line += f"  🎯 {_e(' '.join(what))}\n"
-    if end_fmt:
-        line += f"  ⏰ Kończy się {_e(end_fmt)}"
-        if days:
-            line += f" — {_e(days)}"
-        line += "\n"
+    if start_fmt and end_fmt:
+        try:
+            start_dt = datetime.fromisoformat(badge["badgeStartDate"]).date()
+            started = start_dt < date.today()
+        except Exception:
+            started = False
+        verb = "Wyzwanie zaczęło się" if started else "Wyzwanie zaczyna się"
+        line += f"  ⏰ {_e(f'{verb} {start_fmt} a kończy {end_fmt}')}\n"
+    elif end_fmt:
+        line += f"  ⏰ {_e(f'Kończy się {end_fmt}')}\n"
     return line
 
 
@@ -112,17 +108,18 @@ def build_today_special_message(badges: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def build_daily_message(data: dict) -> str:
+def build_daily_message(data: dict, header: str | None = None) -> str:
     newly_earned = data.get("newly_earned", [])
     available = data.get("available_challenges", [])
+    header_line = header if header is not None else "👋🏻 *Żeby nie umknęło\\!*"
 
     if not newly_earned and not available:
         return (
-            "👋 *Żeby nie umknęło\\!*\n\n"
+            f"{header_line}\n\n"
             "Brak nowych odznak i aktywnych wyzwań w tym tygodniu\\. Ruszaj się\\! 🚶"
         )
 
-    lines = ["👋 *Żeby nie umknęło\\!*\n"]
+    lines = [f"{header_line}\n"]
 
     if newly_earned:
         lines.append("🎉 *Zdobyte odznaki:*")
@@ -135,7 +132,9 @@ def build_daily_message(data: dict) -> str:
             available,
             key=lambda b: b.get("badgeEndDate") or "9999"
         )
-        lines.append("*Dostępne odznaki w tym tygodniu:*\n")
+        # Only add section heading when it's not already in the header
+        if header is None:
+            lines.append("*Dostępne odznaki w tym tygodniu:*\n")
         for b in available_sorted:
             lines.append(_badge_line(b))
 

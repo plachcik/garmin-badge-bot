@@ -4,9 +4,8 @@ from datetime import datetime, timedelta
 from message_builder import (
     DIFFICULTY_STARS,
     _badge_line,
-    _days_left,
     _e,
-    _format_date,
+    _format_date_pl,
     _format_target,
     build_daily_message,
     build_today_special_message,
@@ -88,57 +87,30 @@ class TestFormatTarget:
 
 
 # ---------------------------------------------------------------------------
-# _format_date
+# _format_date_pl
 # ---------------------------------------------------------------------------
 
-class TestFormatDate:
-    def test_iso_date(self):
-        assert _format_date("2024-06-15T23:59:59") == "Jun 15"
+class TestFormatDatePl:
+    def test_june(self):
+        assert _format_date_pl("2024-06-15T23:59:59") == "15 czerwca"
 
-    def test_iso_date_with_trailing_zeros(self):
-        # garmin sometimes has "2024-06-15T23:59:59.000000"
-        assert _format_date("2024-06-15T23:59:59.000000") == "Jun 15"
+    def test_january(self):
+        assert _format_date_pl("2024-01-01T00:00:00") == "1 stycznia"
+
+    def test_december(self):
+        assert _format_date_pl("2024-12-31T23:59:59") == "31 grudnia"
+
+    def test_with_microseconds(self):
+        assert _format_date_pl("2026-06-12T00:00:00.0") == "12 czerwca"
 
     def test_none_returns_empty(self):
-        assert _format_date(None) == ""
+        assert _format_date_pl(None) == ""
 
     def test_empty_returns_empty(self):
-        assert _format_date("") == ""
+        assert _format_date_pl("") == ""
 
     def test_unparseable_returns_original(self):
-        assert _format_date("not-a-date") == "not-a-date"
-
-
-# ---------------------------------------------------------------------------
-# _days_left
-# ---------------------------------------------------------------------------
-
-class TestDaysLeft:
-    def _future(self, days: int) -> str:
-        return (datetime.now() + timedelta(days=days, hours=1)).isoformat()
-
-    def _past(self, days: int) -> str:
-        return (datetime.now() - timedelta(days=days)).isoformat()
-
-    def test_today_returns_last_day(self):
-        # end = now + 30 minutes → still "today"
-        end = (datetime.now() + timedelta(minutes=30)).isoformat()
-        assert _days_left(end) == "ostatni dzień!"
-
-    def test_tomorrow(self):
-        assert _days_left(self._future(1)) == "jeszcze 1 dni"
-
-    def test_five_days(self):
-        assert _days_left(self._future(5)) == "jeszcze 5 dni"
-
-    def test_past_returns_minelo(self):
-        assert _days_left(self._past(1)) == "minęło"
-
-    def test_none_returns_empty(self):
-        assert _days_left(None) == ""
-
-    def test_empty_returns_empty(self):
-        assert _days_left("") == ""
+        assert _format_date_pl("not-a-date") == "not-a-date"
 
 
 # ---------------------------------------------------------------------------
@@ -147,13 +119,13 @@ class TestDaysLeft:
 
 class TestBadgeLine:
     def _badge(self, **kwargs):
-        end = (datetime.now() + timedelta(days=3)).isoformat()
         defaults = {
             "badgeName": "Test Badge",
             "badgeDifficultyId": 1,
             "badgeTargetValue": 5000,
             "badgeUnitId": 1,
-            "badgeEndDate": end,
+            "badgeStartDate": "2026-06-12T00:00:00.0",
+            "badgeEndDate": "2026-06-14T23:59:59.0",
             "badgeAssocType": "none",
         }
         defaults.update(kwargs)
@@ -175,26 +147,35 @@ class TestBadgeLine:
         line = _badge_line(self._badge(badgeTargetValue=5000, badgeUnitId=1))
         assert "5 km" in line
 
-    def test_end_date_rendered(self):
+    def test_start_and_end_date_rendered(self):
         line = _badge_line(self._badge())
-        assert "Kończy się" in line
+        assert "Wyzwanie zaczyna się 12 czerwca a kończy 14 czerwca" in line
 
-    def test_days_left_rendered(self):
-        line = _badge_line(self._badge())
-        assert "jeszcze" in line or "ostatni" in line
+    def test_only_end_date_rendered_when_no_start(self):
+        badge = self._badge(badgeStartDate=None)
+        line = _badge_line(badge)
+        assert "Kończy się 14 czerwca" in line
+        assert "Wyzwanie zaczyna się" not in line
+
+    def test_polish_month_name(self):
+        badge = self._badge(
+            badgeStartDate="2026-01-01T00:00:00",
+            badgeEndDate="2026-01-03T23:59:59",
+        )
+        line = _badge_line(badge)
+        assert "stycznia" in line
 
     def test_no_target_skips_goal_line(self):
-        # Remove both target AND assoc so the 🎯 line is truly empty
         badge = self._badge()
         del badge["badgeTargetValue"]
         badge["badgeAssocType"] = ""
         line = _badge_line(badge)
         assert "🎯" not in line
 
-    def test_no_end_date_skips_deadline(self):
-        badge = self._badge(badgeEndDate=None)
+    def test_no_dates_skips_deadline(self):
+        badge = self._badge(badgeStartDate=None, badgeEndDate=None)
         line = _badge_line(badge)
-        assert "Kończy się" not in line
+        assert "⏰" not in line
 
 
 # ---------------------------------------------------------------------------
@@ -203,12 +184,14 @@ class TestBadgeLine:
 
 class TestBuildDailyMessage:
     def _available_badge(self, name="Badge A", days_until_end=3):
+        start = datetime.now().isoformat()
         end = (datetime.now() + timedelta(days=days_until_end)).isoformat()
         return {
             "badgeName": name,
             "badgeDifficultyId": 2,
             "badgeTargetValue": 10000,
             "badgeUnitId": 5,
+            "badgeStartDate": start,
             "badgeEndDate": end,
             "badgeAssocType": "none",
         }
@@ -223,6 +206,7 @@ class TestBuildDailyMessage:
 
     def test_header_always_present(self):
         msg = build_daily_message({"newly_earned": [], "available_challenges": []})
+        assert "👋🏻" in msg
         assert "Żeby nie umknęło" in msg
 
     def test_available_section_heading(self):

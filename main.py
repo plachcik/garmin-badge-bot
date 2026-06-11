@@ -105,7 +105,7 @@ async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Weekly badges
         data = fetch_badge_updates(GARMIN_EMAIL, GARMIN_PASSWORD)
-        msg = build_daily_message(data)
+        msg = build_daily_message(data, header="👋🏻 *Dostępne odznaki w tym tygodniu:*")
         await send_long_message(update.message.reply_text, msg)
 
         # Today-special badges — silent if none found
