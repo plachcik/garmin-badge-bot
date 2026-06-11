@@ -195,6 +195,107 @@ class TestFetchBadgeUpdates:
 
 
 # ---------------------------------------------------------------------------
+# fetch_today_special_badges — same-day-of-year filter
+# ---------------------------------------------------------------------------
+
+class TestFetchTodaySpecialBadges:
+    """
+    Badges where start month+day == end month+day == today month+day
+    should be returned; everything else should be excluded.
+    """
+
+    def _make_badge(
+        self,
+        start_year: int,
+        end_year: int,
+        month: int,
+        day: int,
+        earned: bool = False,
+        badge_id: str = "1",
+    ) -> dict:
+        start = f"{start_year}-{month:02d}-{day:02d}T00:00:00"
+        end = f"{end_year}-{month:02d}-{day:02d}T23:59:59"
+        return {
+            "badgeName": f"Badge {badge_id}",
+            "badgeId": badge_id,
+            "earnedByMe": earned,
+            "badgeStartDate": start,
+            "badgeEndDate": end,
+        }
+
+    def _run(self, badges, monkeypatch):
+        monkeypatch.setattr(garmin_client, "_session", MagicMock())
+        with patch.object(garmin_client, "_get", return_value=badges):
+            return garmin_client.fetch_today_special_badges()
+
+    def test_matching_badge_returned(self, monkeypatch):
+        from datetime import date
+        today = date.today()
+        badge = self._make_badge(2019, 2030, today.month, today.day, badge_id="1")
+        result = self._run([badge], monkeypatch)
+        assert len(result) == 1
+        assert result[0]["badgeId"] == "1"
+
+    def test_different_day_excluded(self, monkeypatch):
+        from datetime import date, timedelta
+        tomorrow = date.today() + timedelta(days=1)
+        badge = self._make_badge(2019, 2030, tomorrow.month, tomorrow.day, badge_id="2")
+        result = self._run([badge], monkeypatch)
+        assert result == []
+
+    def test_mismatched_start_end_day_excluded(self, monkeypatch):
+        # start=Jan 1, end=Jan 2 → not same day → excluded
+        badge = {
+            "badgeName": "Mismatch",
+            "badgeId": "3",
+            "earnedByMe": False,
+            "badgeStartDate": "2019-01-01T00:00:00",
+            "badgeEndDate": "2019-01-02T23:59:59",
+        }
+        result = self._run([badge], monkeypatch)
+        assert result == []
+
+    def test_earned_badge_excluded(self, monkeypatch):
+        from datetime import date
+        today = date.today()
+        badge = self._make_badge(2019, 2030, today.month, today.day, earned=True, badge_id="4")
+        result = self._run([badge], monkeypatch)
+        assert result == []
+
+    def test_missing_start_date_excluded(self, monkeypatch):
+        from datetime import date
+        today = date.today()
+        badge = {
+            "badgeName": "No Start",
+            "badgeId": "5",
+            "earnedByMe": False,
+            "badgeStartDate": None,
+            "badgeEndDate": f"{today.year}-{today.month:02d}-{today.day:02d}T23:59:59",
+        }
+        result = self._run([badge], monkeypatch)
+        assert result == []
+
+    def test_empty_response_returns_empty(self, monkeypatch):
+        assert self._run([], monkeypatch) == []
+
+    def test_api_error_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(garmin_client, "_session", MagicMock())
+        with patch.object(garmin_client, "_get", side_effect=RuntimeError("boom")):
+            result = garmin_client.fetch_today_special_badges()
+        assert result == []
+
+    def test_multiple_matching_badges_all_returned(self, monkeypatch):
+        from datetime import date
+        today = date.today()
+        badges = [
+            self._make_badge(2019, 2030, today.month, today.day, badge_id=str(i))
+            for i in range(3)
+        ]
+        result = self._run(badges, monkeypatch)
+        assert len(result) == 3
+
+
+# ---------------------------------------------------------------------------
 # _build_session
 # ---------------------------------------------------------------------------
 

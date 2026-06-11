@@ -81,6 +81,37 @@ def _badge_line(badge: dict) -> str:
     return line
 
 
+def _badge_line_today(badge: dict) -> str:
+    """Badge line variant for today-only badges — replaces deadline with 'Tylko dziś!!'."""
+    name = badge.get("badgeName", "Unknown")
+    difficulty = DIFFICULTY_STARS.get(badge.get("badgeDifficultyId", 1), "")
+    target = _format_target(badge)
+    assoc = ASSOC_TYPE_LABEL.get(badge.get("badgeAssocType", ""), "")
+
+    what = []
+    if target:
+        what.append(target)
+    if assoc:
+        what.append(f"({assoc})")
+
+    line = f"• *{_e(name)}* {difficulty}\n"
+    if what:
+        line += f"  🎯 {_e(' '.join(what))}\n"
+    line += "  ⏰ Tylko dziś\\!\\!\n"
+    return line
+
+
+def build_today_special_message(badges: list[dict]) -> str:
+    """Message for same-day annual badges available only today."""
+    lines = [
+        "Żeby nie umknęło 💡\n",
+        "*📅 Dostępne odznaki tylko na dziś:*\n",
+    ]
+    for b in badges:
+        lines.append(_badge_line_today(b))
+    return "\n".join(lines)
+
+
 def build_daily_message(data: dict) -> str:
     newly_earned = data.get("newly_earned", [])
     available = data.get("available_challenges", [])

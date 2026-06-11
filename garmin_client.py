@@ -6,8 +6,11 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-STATE_FILE = "garmin_state.json"
-TOKEN_FILE = "garmin_tokens.json"
+# Persistent files live in /app/data when running in a container (Railway volume),
+# falling back to the current directory for local development.
+_DATA_DIR = os.environ.get("DATA_DIR", ".")
+STATE_FILE = os.path.join(_DATA_DIR, "garmin_state.json")
+TOKEN_FILE = os.path.join(_DATA_DIR, "garmin_tokens.json")
 
 CONNECT_API = "https://connect.garmin.com"
 
@@ -112,6 +115,58 @@ def _get(path: str) -> dict | list:
 
     resp.raise_for_status()
     return resp.json()
+
+
+def fetch_today_special_badges() -> list[dict]:
+    """
+    Return available badges where start and end fall on the same calendar day
+    (same month+day, any year) AND that day is today.
+
+    Example: badgeStartDate=2019-07-04, badgeEndDate=2026-07-04 → fires on July 4th.
+    These are annual/recurring single-day badges that are only meaningful on their
+    specific day, so we notify on that day regardless of the day of week.
+    """
+    if _session is None:
+        get_session()
+
+    from datetime import date, datetime
+
+    today = date.today()
+
+    try:
+        raw = _get("/gc-api/badge-service/badge/available")
+        all_badges = raw if isinstance(raw, list) else raw.get("badgeList", [])
+    except Exception as e:
+        logger.warning("Failed to fetch available badges for today check: %s", e)
+        return []
+
+    result = []
+    for b in all_badges:
+        earned_flag = b.get("earnedByMe") or b.get("badgeEarned") or b.get("earned", False)
+        if earned_flag:
+            continue
+
+        start_str = b.get("badgeStartDate")
+        end_str = b.get("badgeEndDate")
+        if not start_str or not end_str:
+            continue
+
+        try:
+            start_dt = datetime.fromisoformat(start_str).date()
+            end_dt = datetime.fromisoformat(end_str).date()
+        except Exception:
+            continue
+
+        # Same day of year: month and day match between start and end
+        same_day = start_dt.month == end_dt.month and start_dt.day == end_dt.day
+        # That day is today
+        is_today = start_dt.month == today.month and start_dt.day == today.day
+
+        if same_day and is_today:
+            result.append(b)
+
+    logger.info("Today-special badges found: %d", len(result))
+    return result
 
 
 def fetch_badge_updates(email: str, password: str) -> dict:

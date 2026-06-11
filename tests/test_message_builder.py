@@ -9,6 +9,7 @@ from message_builder import (
     _format_date,
     _format_target,
     build_daily_message,
+    build_today_special_message,
 )
 
 # ---------------------------------------------------------------------------
@@ -269,3 +270,54 @@ class TestBuildDailyMessage:
     def test_message_is_string(self):
         msg = build_daily_message({"newly_earned": [], "available_challenges": []})
         assert isinstance(msg, str)
+
+
+# ---------------------------------------------------------------------------
+# build_today_special_message
+# ---------------------------------------------------------------------------
+
+class TestBuildTodaySpecialMessage:
+    def _badge(self, name="Special Badge"):
+        end = (datetime.now() + timedelta(hours=12)).isoformat()
+        return {
+            "badgeName": name,
+            "badgeDifficultyId": 1,
+            "badgeTargetValue": 5000,
+            "badgeUnitId": 1,
+            "badgeEndDate": end,
+            "badgeAssocType": "none",
+        }
+
+    def test_header_zeby_nie_umknelo(self):
+        msg = build_today_special_message([self._badge()])
+        assert "Żeby nie umknęło" in msg
+
+    def test_header_lightbulb_emoji(self):
+        msg = build_today_special_message([self._badge()])
+        assert "💡" in msg
+
+    def test_section_heading(self):
+        msg = build_today_special_message([self._badge()])
+        assert "Dostępne odznaki tylko na dziś" in msg
+
+    def test_calendar_emoji_in_section(self):
+        msg = build_today_special_message([self._badge()])
+        assert "📅" in msg
+
+    def test_tylko_dzis_instead_of_date(self):
+        msg = build_today_special_message([self._badge()])
+        assert "Tylko dziś" in msg
+        assert "Kończy się" not in msg
+
+    def test_badge_name_in_message(self):
+        msg = build_today_special_message([self._badge("Rare Badge")])
+        assert "Rare Badge" in msg
+
+    def test_multiple_badges_all_present(self):
+        badges = [self._badge(f"Badge {i}") for i in range(3)]
+        msg = build_today_special_message(badges)
+        for i in range(3):
+            assert f"Badge {i}" in msg
+
+    def test_returns_string(self):
+        assert isinstance(build_today_special_message([self._badge()]), str)

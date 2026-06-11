@@ -3,10 +3,12 @@ Headless browser login to Garmin Connect using Playwright.
 """
 import json
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
-TOKEN_FILE = "garmin_tokens.json"
+_DATA_DIR = os.environ.get("DATA_DIR", ".")
+TOKEN_FILE = os.path.join(_DATA_DIR, "garmin_tokens.json")
 CONNECT_URL = "https://connect.garmin.com/modern/"
 
 
