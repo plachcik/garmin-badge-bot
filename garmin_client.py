@@ -168,7 +168,7 @@ def fetch_badge_updates(email: str, password: str) -> dict:
             continue
 
         try:
-            end_dt = datetime.fromisoformat(end_str.rstrip("0").rstrip("."))
+            end_dt = datetime.fromisoformat(end_str)
         except Exception:
             continue
 

@@ -26,6 +26,10 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["garmin_auth", "garmin_client", "message_builder"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
 [tool.mypy]
 python_version = "3.12"
 strict = false

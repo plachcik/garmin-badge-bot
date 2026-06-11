@@ -33,7 +33,7 @@ def _format_date(date_str: str | None) -> str:
     if not date_str:
         return ""
     try:
-        dt = datetime.fromisoformat(date_str.rstrip("0").rstrip("."))
+        dt = datetime.fromisoformat(date_str)
         return dt.strftime("%b %d")
     except Exception:
         return date_str
@@ -43,7 +43,7 @@ def _days_left(end_str: str | None) -> str:
     if not end_str:
         return ""
     try:
-        end = datetime.fromisoformat(end_str.rstrip("0").rstrip("."))
+        end = datetime.fromisoformat(end_str)
         delta = (end - datetime.now()).days
         if delta < 0:
             return "minęło"
