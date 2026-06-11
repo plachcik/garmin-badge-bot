@@ -21,7 +21,7 @@ RUN playwright install firefox
 
 USER root
 COPY . .
-RUN chown -R appuser /app
+RUN chown -R appuser /app && mkdir -p /app/data && chown appuser /app/data
 
 USER appuser
 
