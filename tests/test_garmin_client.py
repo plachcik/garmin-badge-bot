@@ -75,23 +75,13 @@ class TestFetchBadgeUpdates:
     They verify the week-filtering and earned-filtering logic in fetch_badge_updates().
     """
 
-    def _run(self, available_badges, earned_badges=None, tmp_path=None, monkeypatch=None):
-        if earned_badges is None:
-            earned_badges = []
-
+    def _run(self, available_badges, tmp_path=None, monkeypatch=None):
         # Redirect state file to a temp location so tests don't clash
         monkeypatch.setattr(garmin_client, "STATE_FILE", str(tmp_path / "state.json"))
         # Reset module-level session so get_session() isn't called
         monkeypatch.setattr(garmin_client, "_session", MagicMock())
 
-        def fake_get(path):
-            if "earned" in path:
-                return earned_badges
-            if "available" in path:
-                return available_badges
-            return []
-
-        with patch.object(garmin_client, "_get", side_effect=fake_get):
+        with patch.object(garmin_client, "_get", return_value=available_badges):
             return garmin_client.fetch_badge_updates("e@mail.com", "pass")
 
     def test_badge_ending_this_week_included(self, tmp_path, monkeypatch):
@@ -141,43 +131,9 @@ class TestFetchBadgeUpdates:
         assert len(result["available_challenges"]) == 1
         assert result["available_challenges"][0]["badgeName"] == "Good"
 
-    def test_newly_earned_detected(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(garmin_client, "STATE_FILE", str(tmp_path / "state.json"))
-        # Pre-seed state with no known earned badges
-        garmin_client.save_state({"earned_badge_ids": [], "notified_challenge_ids": []})
-
-        earned = [{"badgeName": "Shiny", "badgeId": "42"}]
-        result = self._run([], earned_badges=earned, tmp_path=tmp_path, monkeypatch=monkeypatch)
-        assert len(result["newly_earned"]) == 1
-        assert result["newly_earned"][0]["badgeName"] == "Shiny"
-
-    def test_already_known_earned_not_in_newly_earned(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(garmin_client, "STATE_FILE", str(tmp_path / "state.json"))
-        garmin_client.save_state({"earned_badge_ids": ["42"], "notified_challenge_ids": []})
-
-        earned = [{"badgeName": "Old Badge", "badgeId": "42"}]
-        result = self._run([], earned_badges=earned, tmp_path=tmp_path, monkeypatch=monkeypatch)
-        assert result["newly_earned"] == []
-
-    def test_state_saved_after_fetch(self, tmp_path, monkeypatch):
-        state_path = str(tmp_path / "state.json")
-        monkeypatch.setattr(garmin_client, "STATE_FILE", state_path)
-        monkeypatch.setattr(garmin_client, "_session", MagicMock())
-
-        badges = [_badge("Good", end_offset_days=1, badge_id="77")]
-        def side_effect(p):
-            return badges if "available" in p else []
-
-        with patch.object(garmin_client, "_get", side_effect=side_effect):
-            garmin_client.fetch_badge_updates("e@mail.com", "pass")
-
-        with open(state_path) as f:
-            state = json.load(f)
-        assert "77" in state["notified_challenge_ids"]
-
-    def test_empty_response_returns_empty_lists(self, tmp_path, monkeypatch):
+    def test_empty_response_returns_empty_list(self, tmp_path, monkeypatch):
         result = self._run([], tmp_path=tmp_path, monkeypatch=monkeypatch)
-        assert result == {"newly_earned": [], "available_challenges": []}
+        assert result == {"available_challenges": []}
 
     def test_api_failure_returns_empty_available(self, tmp_path, monkeypatch):
         monkeypatch.setattr(garmin_client, "STATE_FILE", str(tmp_path / "state.json"))

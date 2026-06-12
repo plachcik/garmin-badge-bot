@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
+import garmin_client
 from garmin_client import fetch_badge_updates, fetch_today_special_badges
 from message_builder import build_daily_message, build_today_special_message
 from subscribers import add_subscriber, load_subscribers
@@ -64,8 +65,38 @@ async def _broadcast(app: Application, text: str) -> None:
             logger.error("Failed to send to chat_id=%s: %s", chat_id, e)
 
 
+_SCREENSHOT_NAMES = [
+    "login_debug.png",
+    "login_after_submit.png",
+    "login_debug_timeout.png",
+    "login_debug_nobutton.png",
+]
+
+
+async def _notify_admin_login_failure(app: Application, error: Exception) -> None:
+    """Send login failure details + any saved screenshots to the admin (TELEGRAM_CHAT_ID)."""
+    msg = f"🔐 Login to Garmin failed\n\n{error}"
+    try:
+        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
+    except Exception as e:
+        logger.error("Failed to send admin failure message: %s", e)
+        return
+
+    for name in _SCREENSHOT_NAMES:
+        path = os.path.join(_DATA_DIR, name)
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "rb") as f:
+                await app.bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=f, caption=name)
+            logger.info("Sent screenshot %s to admin", name)
+        except Exception as e:
+            logger.warning("Failed to send screenshot %s: %s", name, e)
+
+
 async def send_weekly_digest(app: Application):
     """Every Monday at 8 AM — all badges available this week."""
+    garmin_client._refresh_failed = False  # reset so each scheduled run gets a fresh attempt
     logger.info("Running weekly badge digest... [triggered by: scheduler]")
     try:
         data = fetch_badge_updates(GARMIN_EMAIL, GARMIN_PASSWORD)
@@ -74,7 +105,10 @@ async def send_weekly_digest(app: Application):
         logger.info("Weekly digest sent.")
     except Exception as e:
         logger.error("Failed to send weekly digest: %s", e)
-        await _broadcast(app, f"⚠️ Error fetching Garmin badges: {e}")
+        if garmin_client._refresh_failed:
+            await _notify_admin_login_failure(app, e)
+        else:
+            await _broadcast(app, f"⚠️ Error fetching Garmin badges: {e}")
 
 
 async def send_today_special(app: Application):
@@ -90,7 +124,10 @@ async def send_today_special(app: Application):
         logger.info("Today-special message sent (%d badge(s)).", len(badges))
     except Exception as e:
         logger.error("Failed to send today-special badges: %s", e)
-        await _broadcast(app, f"⚠️ Error fetching today's special badges: {e}")
+        if garmin_client._refresh_failed:
+            await _notify_admin_login_failure(app, e)
+        else:
+            await _broadcast(app, f"⚠️ Error fetching today's special badges: {e}")
 
 
 async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,6 +168,7 @@ async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(
         "Badge check triggered by user: %s (id=%s)", user.username or user.first_name, user.id
     )
+    garmin_client._refresh_failed = False  # always attempt fresh login on manual check
     await update.message.reply_text("⏳ Sprawdzam odznaki\\.\\.\\.", parse_mode="MarkdownV2")
     try:
         # Weekly badges
@@ -146,26 +184,56 @@ async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error("cmd_check error: %s", e)
         await update.message.reply_text(f"⚠️ Error: {e}")
+        if garmin_client._refresh_failed:
+            await _notify_admin_login_failure(context.application, e)
 
 
-def main():
-    # Pre-load Garmin session before starting the bot
-    from garmin_client import TOKEN_FILE, get_session
+def _startup_login() -> None:
+    """Ensure a valid Garmin session exists before the bot starts polling."""
+    import concurrent.futures
+
+    from garmin_auth import get_fresh_tokens
+    from garmin_client import TOKEN_FILE, _get, get_session
+
+    # First-time setup: no token file at all
     if not os.path.exists(TOKEN_FILE):
         logger.info("No token file found — running first-time Playwright login...")
-        import concurrent.futures
-
-        from garmin_auth import get_fresh_tokens
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 executor.submit(get_fresh_tokens, GARMIN_EMAIL, GARMIN_PASSWORD).result(timeout=120)
             logger.info("First-time login complete.")
         except Exception as e:
             logger.error("First-time login failed: %s", e)
+            return
+
+    # Load the session from the token file
     try:
         get_session()
     except Exception as e:
-        logger.warning("Garmin session pre-load failed: %s", e)
+        logger.error("Failed to load Garmin session: %s", e)
+        return
+
+    # Probe the API — if the saved token is expired, refresh right now
+    logger.info("Probing Garmin API to verify session...")
+    try:
+        _get("/gc-api/badge-service/badge/available")
+        logger.info("Garmin session is valid ✅")
+    except Exception as e:
+        logger.warning("Session probe failed (%s) — refreshing via Playwright...", e)
+        garmin_client._refresh_failed = False
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                executor.submit(get_fresh_tokens, GARMIN_EMAIL, GARMIN_PASSWORD).result(timeout=120)
+            logger.info("Startup Playwright login complete ✅")
+            # Rebuild the session with the new tokens
+            garmin_client._session = None
+            get_session()
+        except Exception as refresh_err:
+            logger.error("Startup Playwright login failed: %s", refresh_err)
+
+
+def main():
+    _startup_login()
 
     scheduler = AsyncIOScheduler()
 
@@ -182,22 +250,44 @@ def main():
             DAILY_HOUR, DAILY_MINUTE, ph, pm,
         )
 
-        # Today-special check — every day at 8 AM UTC
+        # Today-special check — 1 minute after weekly digest to avoid overlap
+        special_minute = (DAILY_MINUTE + 1) % 60
+        special_hour = DAILY_HOUR + (1 if DAILY_MINUTE == 59 else 0)
         scheduler.add_job(
             send_today_special,
             trigger="cron",
-            hour=DAILY_HOUR,
-            minute=DAILY_MINUTE,
+            hour=special_hour,
+            minute=special_minute,
             args=[application],
         )
 
         scheduler.start()
+
+        # Log all current subscribers with their display names
+        subscribers = load_subscribers()
+        if subscribers:
+            logger.info("Subscribers (%d):", len(subscribers))
+            for chat_id in subscribers:
+                try:
+                    chat = await application.bot.get_chat(chat_id)
+                    display = chat.title or chat.full_name or str(chat_id)
+                    if chat.username:
+                        display = f"{display} (@{chat.username})"
+                    name = display
+                    logger.info("  • %s (id=%s)", name, chat_id)
+                except Exception as e:
+                    logger.info("  • [unknown] (id=%s) — %s", chat_id, e)
+        else:
+            logger.info("No subscribers yet — will fall back to TELEGRAM_CHAT_ID=%s", TELEGRAM_CHAT_ID)
+
         ph, pm = _utc_to_poland(DAILY_HOUR, DAILY_MINUTE)
+        sph, spm = _utc_to_poland(special_hour, special_minute)
         logger.info(
-            "Scheduler started — weekly digest %s + today-special check every day"
-            " at %02d:%02d UTC = %02d:%02d Poland time",
+            "Scheduler started — weekly digest %s at %02d:%02d UTC = %02d:%02d Poland time,"
+            " today-special at %02d:%02d UTC = %02d:%02d Poland time",
             "every day" if WEEKLY_EVERY_DAY else "Mondays only",
             DAILY_HOUR, DAILY_MINUTE, ph, pm,
+            special_hour, special_minute, sph, spm,
         )
 
     async def on_shutdown(application):

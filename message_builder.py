@@ -109,23 +109,16 @@ def build_today_special_message(badges: list[dict]) -> str:
 
 
 def build_daily_message(data: dict, header: str | None = None) -> str:
-    newly_earned = data.get("newly_earned", [])
     available = data.get("available_challenges", [])
     header_line = header if header is not None else "👋🏻 *Żeby nie umknęło\\!*"
 
-    if not newly_earned and not available:
+    if not available:
         return (
             f"{header_line}\n\n"
-            "Brak nowych odznak i aktywnych wyzwań w tym tygodniu\\. Ruszaj się\\! 🚶"
+            "Brak aktywnych wyzwań w tym tygodniu\\. Ruszaj się\\! 🚶"
         )
 
     lines = [f"{header_line}\n"]
-
-    if newly_earned:
-        lines.append("🎉 *Zdobyte odznaki:*")
-        for b in newly_earned:
-            lines.append(f"  ✅ {_e(b.get('badgeName', 'Unknown'))}")
-        lines.append("")
 
     if available:
         available_sorted = sorted(

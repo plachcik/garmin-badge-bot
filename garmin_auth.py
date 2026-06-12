@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 _DATA_DIR = os.environ.get("DATA_DIR", ".")
 TOKEN_FILE = os.path.join(_DATA_DIR, "garmin_tokens.json")
 CONNECT_URL = "https://connect.garmin.com/modern/"
+SSO_URL = (
+    "https://sso.garmin.com/portal/sso/en-US/sign-in"
+    "?clientId=GarminConnect&service=https%3A%2F%2Fconnect.garmin.com%2Fapp"
+)
 
 
 def _screenshot(page, name: str) -> str:
@@ -42,89 +46,80 @@ def get_fresh_tokens(email: str, password: str) -> dict:
         )
         page = context.new_page()
 
-        logger.info("Navigating to Garmin Connect (will redirect to SSO)...")
-        page.goto(CONNECT_URL, timeout=30000)
+        # Navigate directly to the SSO sign-in page (known-good URL with correct service param)
+        logger.info("Navigating directly to SSO sign-in page...")
+        page.goto(SSO_URL, timeout=30000)
 
-        # Wait until we land on the SSO signin page
+        # Let the SPA fully render
         try:
-            page.wait_for_url("**/sso.garmin.com/**", timeout=15000)
-            logger.info("Redirected to SSO page: %s", page.url)
+            page.wait_for_load_state("networkidle", timeout=15000)
         except PWTimeout:
-            logger.info("No SSO redirect — current URL: %s", page.url)
+            logger.info("networkidle timeout — proceeding anyway")
+        logger.info("SSO page loaded: %s", page.url)
 
-        # Fill login form (Garmin SSO page)
+        # Fill login form
         try:
             email_sel = (
                 "#username, input[name='username'], input[type='email'], input[name='email']"
             )
-            page.wait_for_selector(email_sel, timeout=10000)
+            page.wait_for_selector(email_sel, timeout=20000)
             logger.info("Login form found, filling credentials...")
 
-            # Use type() instead of fill() so React detects the change events
-            page.click(email_sel)
-            page.type(email_sel, email, delay=50)
-
             pass_sel = "#password, input[name='password'], input[type='password']"
-            page.click(pass_sel)
-            page.type(pass_sel, password, delay=50)
+
+            # Use React's native input setter — this triggers the synthetic onChange that
+            # controlled inputs listen to, which is what enables the submit button.
+            page.evaluate(
+                """([emailVal, passVal, emailSel, passSel]) => {
+                    const setter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value').set;
+                    const fire = (el, val) => {
+                        setter.call(el, val);
+                        el.dispatchEvent(new Event('input',  { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    };
+                    const emailEl = document.querySelector(emailSel);
+                    const passEl  = document.querySelector(passSel);
+                    if (emailEl) fire(emailEl, emailVal);
+                    if (passEl)  fire(passEl,  passVal);
+                }""",
+                [email, password, "#username,input[name='username'],input[type='email']",
+                 "#password,input[name='password'],input[type='password']"],
+            )
+            logger.info("Credentials set via React native setter")
+
+            # Poll for the submit button to become enabled (up to 5 s)
+            import contextlib
+            submit_btn = None
+            _SUBMIT_TEXTS = {"sign in", "log in", "continue", "zaloguj", "dalej", "next"}
+            for attempt in range(10):
+                page.wait_for_timeout(500)
+                for btn in page.locator("button").all():
+                    with contextlib.suppress(Exception):
+                        if btn.is_visible() and (
+                            btn.get_attribute("type") == "submit"
+                            or btn.inner_text().strip().lower() in _SUBMIT_TEXTS
+                        ):
+                            submit_btn = btn
+                            break
+                if submit_btn is not None and submit_btn.is_enabled():
+                    logger.info("Submit button enabled after %d × 500ms", attempt + 1)
+                    break
+                submit_btn = None  # keep polling if still disabled
 
             # Screenshot before submit — saved to DATA_DIR (persists on Railway volume)
             _screenshot(page, "login_debug.png")
 
-            # Log every button on the page so we know what's available
-            try:
-                all_buttons = page.locator("button").all()
-                logger.info("Buttons on page (%d):", len(all_buttons))
-                for i, btn in enumerate(all_buttons):
-                    import contextlib
-                    with contextlib.suppress(Exception):
-                        logger.info(
-                            "  [%d] visible=%s text=%r type=%r id=%r",
-                            i,
-                            btn.is_visible(),
-                            btn.inner_text(),
-                            btn.get_attribute("type"),
-                            btn.get_attribute("id"),
-                        )
-            except Exception as e:
-                logger.warning("Could not enumerate buttons: %s", e)
-
-            # Wait for the submit button to be visible and click it
             submitted = False
-            for btn_sel in [
-                "#login-btn-signin",
-                "button[data-testid='login-submit-btn']",
-                "button[type='submit']",
-                "input[type='submit']",
-                "button:has-text('Sign In')",
-                "button:has-text('Log In')",
-                "button:has-text('Continue')",
-                "button:has-text('Zaloguj')",
-                "button:has-text('Dalej')",
-                "button:has-text('Next')",
-            ]:
-                try:
-                    locator = page.locator(btn_sel)
-                    locator.wait_for(state="visible", timeout=3000)
-                    locator.click()
-                    logger.info("Clicked submit with selector: %s", btn_sel)
-                    submitted = True
-                    break
-                except Exception:
-                    continue
-
-            if not submitted:
-                # Last resort — click the first visible button on the page
-                try:
-                    buttons = page.locator("button").all()
-                    for btn in buttons:
-                        if btn.is_visible():
-                            logger.info("Last-resort click: %r", btn.inner_text())
-                            btn.click()
-                            submitted = True
-                            break
-                except Exception as e:
-                    logger.warning("Last-resort button click failed: %s", e)
+            if submit_btn is not None:
+                logger.info("Clicking submit button (force=True)")
+                submit_btn.click(force=True)
+                submitted = True
+            else:
+                # Button never became enabled — press Enter as last resort
+                logger.info("Submit button stayed disabled after 5s — pressing Enter on password field")
+                page.press(pass_sel, "Enter")
+                submitted = True
 
             if not submitted:
                 _screenshot(page, "login_debug_nobutton.png")

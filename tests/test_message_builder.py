@@ -196,63 +196,47 @@ class TestBuildDailyMessage:
             "badgeAssocType": "none",
         }
 
-    def _earned_badge(self, name="Earned Badge"):
-        return {"badgeName": name, "badgeId": "123"}
-
     def test_empty_data_returns_no_badges_message(self):
-        msg = build_daily_message({"newly_earned": [], "available_challenges": []})
-        assert "Brak nowych odznak" in msg
+        msg = build_daily_message({"available_challenges": []})
+        assert "Brak aktywnych wyzwań" in msg
         assert "Ruszaj się" in msg
 
     def test_header_always_present(self):
-        msg = build_daily_message({"newly_earned": [], "available_challenges": []})
+        msg = build_daily_message({"available_challenges": []})
         assert "👋🏻" in msg
         assert "Żeby nie umknęło" in msg
 
     def test_available_section_heading(self):
         msg = build_daily_message({
-            "newly_earned": [],
             "available_challenges": [self._available_badge()],
         })
         assert "Dostępne odznaki w tym tygodniu" in msg
 
     def test_available_badge_name_in_message(self):
         msg = build_daily_message({
-            "newly_earned": [],
             "available_challenges": [self._available_badge("Super Badge")],
         })
         assert "Super Badge" in msg
-
-    def test_newly_earned_section(self):
-        msg = build_daily_message({
-            "newly_earned": [self._earned_badge("Gold Medal")],
-            "available_challenges": [],
-        })
-        assert "Zdobyte odznaki" in msg
-        assert "Gold Medal" in msg
-        assert "✅" in msg
 
     def test_available_sorted_by_end_date(self):
         soon = self._available_badge("Ends Soon", days_until_end=1)
         later = self._available_badge("Ends Later", days_until_end=5)
         msg = build_daily_message({
-            "newly_earned": [],
             "available_challenges": [later, soon],  # intentionally wrong order
         })
         assert msg.index("Ends Soon") < msg.index("Ends Later")
 
     def test_multiple_available_badges(self):
         badges = [self._available_badge(f"Badge {i}") for i in range(3)]
-        msg = build_daily_message({"newly_earned": [], "available_challenges": badges})
+        msg = build_daily_message({"available_challenges": badges})
         for i in range(3):
             assert f"Badge {i}" in msg
 
     def test_missing_keys_handled_gracefully(self):
-        # Completely empty badge dict — should not raise
-        build_daily_message({"newly_earned": [{}], "available_challenges": [{}]})
+        build_daily_message({"available_challenges": [{}]})
 
     def test_message_is_string(self):
-        msg = build_daily_message({"newly_earned": [], "available_challenges": []})
+        msg = build_daily_message({"available_challenges": []})
         assert isinstance(msg, str)
 
 

@@ -16,6 +16,7 @@ CONNECT_API = "https://connect.garmin.com"
 
 _session: requests.Session | None = None
 _token_data: dict = {}
+_refresh_failed: bool = False  # prevents repeated Playwright launches in the same run
 
 
 def load_state() -> dict:
@@ -56,6 +57,11 @@ def _build_session(token_data: dict) -> requests.Session:
 
 def _refresh_jwt(token_data: dict) -> bool:
     """Use Playwright headless browser (in a thread) to get a fresh session."""
+    global _refresh_failed
+    if _refresh_failed:
+        logger.warning("Skipping refresh — already failed once this run.")
+        return False
+
     import concurrent.futures
     import os as _os
 
@@ -66,14 +72,15 @@ def _refresh_jwt(token_data: dict) -> bool:
         logger.error("GARMIN_EMAIL/PASSWORD not set — cannot auto-refresh.")
         return False
     try:
-        # Run sync Playwright in a thread to avoid asyncio conflict
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(get_fresh_tokens, email, password)
-            new_data = future.result(timeout=60)
+            new_data = future.result(timeout=120)
         token_data.update(new_data)
+        _refresh_failed = False
         return bool(new_data.get("access_token"))
     except Exception as e:
         logger.error("Playwright refresh failed: %s", e)
+        _refresh_failed = True
         return False
 
 
@@ -93,6 +100,7 @@ def get_session() -> requests.Session:
         raise RuntimeError("Old token format. Run: python setup_playwright.py")
 
     _session = _build_session(_token_data)
+    _refresh_failed = False
     logger.info("Garmin: session loaded from %s", TOKEN_FILE)
     return _session
 
@@ -112,6 +120,7 @@ def _get(path: str) -> dict | list:
             resp = _session.get(url)
         else:
             logger.error("Refresh failed. Response body: %s", resp.text[:300])
+            _session = None  # force re-login on next scheduled run
 
     resp.raise_for_status()
     return resp.json()
@@ -173,22 +182,6 @@ def fetch_badge_updates(email: str, password: str) -> dict:
     if _session is None:
         get_session()
 
-    state = load_state()
-
-    # --- Earned badges ---
-    try:
-        earned_raw = _get("/gc-api/badge-service/badge/earned")
-        earned_badges = (
-            earned_raw if isinstance(earned_raw, list) else earned_raw.get("badgeList", [])
-        )
-    except Exception as e:
-        logger.error("Failed to fetch earned badges: %s", e)
-        earned_badges = []
-
-    known_ids = set(state["earned_badge_ids"])
-    newly_earned = [b for b in earned_badges if str(b.get("badgeId", "")) not in known_ids]
-    state["earned_badge_ids"] = [str(b.get("badgeId", "")) for b in earned_badges]
-
     # --- Available badges ---
     try:
         challenges_raw = _get("/gc-api/badge-service/badge/available")
@@ -203,39 +196,23 @@ def fetch_badge_updates(email: str, password: str) -> dict:
 
     from datetime import datetime, timedelta
     now = datetime.now()
-    week_monday = now - timedelta(days=now.weekday())  # Monday 00:00
+    week_monday = now - timedelta(days=now.weekday())
     week_monday = week_monday.replace(hour=0, minute=0, second=0, microsecond=0)
     week_sunday = week_monday + timedelta(days=6, hours=23, minutes=59, seconds=59)
 
     available_challenges = []
-    new_challenge_ids = []
-
     for c in challenges:
-        cid = str(c.get("badgeChallengeId") or c.get("badgeId", ""))
         earned_flag = c.get("earnedByMe") or c.get("badgeEarned") or c.get("earned", False)
         if earned_flag:
             continue
-
         end_str = c.get("badgeEndDate")
-
-        # Skip badges with no end date
         if not end_str:
             continue
-
         try:
             end_dt = datetime.fromisoformat(end_str)
         except Exception:
             continue
-
-        # Badge must end within this week (Mon–Sun)
-        if end_dt <= week_sunday and end_dt >= week_monday:
+        if week_monday <= end_dt <= week_sunday:
             available_challenges.append(c)
-            new_challenge_ids.append(cid)
 
-    state["notified_challenge_ids"] = new_challenge_ids
-    save_state(state)
-
-    return {
-        "newly_earned": newly_earned,
-        "available_challenges": available_challenges,
-    }
+    return {"available_challenges": available_challenges}
