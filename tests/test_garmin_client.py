@@ -87,6 +87,24 @@ class TestFetchBadgeUpdates:
         result = self._run([badge])
         assert len(result["available_challenges"]) == 1
 
+    def test_country_restricted_without_pl_excluded(self):
+        badge = _badge("Asia Only", end_offset_days=2)
+        badge["countries"] = [{"id": "CN"}, {"id": "TW"}]
+        result = self._run([badge])
+        assert result["available_challenges"] == []
+
+    def test_country_restricted_with_pl_included(self):
+        badge = _badge("Poland Included", end_offset_days=2)
+        badge["countries"] = [{"id": "PL"}, {"id": "DE"}]
+        result = self._run([badge])
+        assert len(result["available_challenges"]) == 1
+
+    def test_no_country_restriction_included(self):
+        badge = _badge("Global", end_offset_days=2)
+        badge["countries"] = []
+        result = self._run([badge])
+        assert len(result["available_challenges"]) == 1
+
     def test_api_failure_propagates(self):
         import pytest
         with (
@@ -163,3 +181,24 @@ class TestFetchTodaySpecialBadges:
 
     def test_empty_response_returns_empty_list(self):
         assert self._run([]) == []
+
+    def test_country_restricted_without_pl_excluded(self):
+        from datetime import date
+        t = date.today()
+        badge = self._make(2019, 2030, t.month, t.day)
+        badge["countries"] = [{"id": "CN"}, {"id": "TW"}]
+        assert self._run([badge]) == []
+
+    def test_country_restricted_with_pl_included(self):
+        from datetime import date
+        t = date.today()
+        badge = self._make(2019, 2030, t.month, t.day)
+        badge["countries"] = [{"id": "PL"}, {"id": "DE"}]
+        assert len(self._run([badge])) == 1
+
+    def test_no_country_restriction_included(self):
+        from datetime import date
+        t = date.today()
+        badge = self._make(2019, 2030, t.month, t.day)
+        badge["countries"] = []
+        assert len(self._run([badge])) == 1

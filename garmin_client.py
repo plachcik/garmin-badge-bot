@@ -14,6 +14,11 @@ def _fetch_all() -> list[dict]:
     return resp.json()
 
 
+def _available_in_poland(badge: dict) -> bool:
+    countries = badge.get("countries") or []
+    return not countries or any(c.get("id") == "PL" for c in countries)
+
+
 def _parse_dt(s: str) -> datetime:
     return datetime.fromisoformat(s[:19])
 
@@ -31,6 +36,8 @@ def fetch_badge_updates() -> dict:
     available = []
     for b in badges:
         if b.get("premium"):
+            continue
+        if not _available_in_poland(b):
             continue
         end_str = b.get("end_date")
         if not end_str:
@@ -55,6 +62,8 @@ def fetch_today_special_badges() -> list[dict]:
     result = []
     for b in badges:
         if b.get("premium"):
+            continue
+        if not _available_in_poland(b):
             continue
         start_str = b.get("start_date")
         end_str = b.get("end_date")
