@@ -26,11 +26,41 @@ def _format_date_pl(date_str: str | None) -> str:
         return date_str or ""
 
 
+_ACTIVITY_LABELS = {
+    "cycling": "Jazda na rowerze",
+    "running": "Bieganie",
+    "swimming": "Pływanie",
+    "walking": "Spacer",
+    "hiking": "Trekking",
+    "yoga": "Joga",
+    "strength": "Trening siłowy",
+    "cardio": "Kardio",
+    "rowing": "Wioślarstwo",
+    "skiing": "Narciarstwo",
+    "golf": "Golf",
+    "tennis": "Tenis",
+    "climbing": "Wspinaczka",
+    "paddling": "Kajakarstwo",
+    "surfing": "Surfing",
+}
+
+
+def _extract_activity_label(desc: str) -> str | None:
+    for keyword, label in _ACTIVITY_LABELS.items():
+        if keyword in desc:
+            return label
+    return None
+
+
 def _format_goal(badge: dict) -> str:
     """Return a formatted goal string like '100,000 kroków (łącznie)' or '' if no target."""
     target_str = badge.get("target_value")
     if not target_str:
-        return ""
+        desc = (badge.get("description") or "").lower()
+        if desc.startswith("record an activity"):
+            return "Dowolna aktywność"
+        label = _extract_activity_label(desc)
+        return label if label else ""
     target = float(target_str)
     desc = (badge.get("description") or "").lower()
 

@@ -188,10 +188,22 @@ class TestFormatGoal:
         assert "(jedna aktywność)" in _format_goal(b)
 
     def test_no_target_returns_empty(self):
-        assert _format_goal({"target_value": None}) == ""
+        assert _format_goal({"target_value": None, "description": "Do something."}) == ""
 
     def test_missing_target_returns_empty(self):
         assert _format_goal({}) == ""
+
+    def test_record_an_activity_no_target(self):
+        b = {"target_value": None, "description": "Record an activity on Global Wellness Day."}
+        assert _format_goal(b) == "Dowolna aktywność"
+
+    def test_join_challenge_cycling_extracts_label(self):
+        b = {"target_value": None, "description": "Join this challenge and record a 40-kilometer cycling activity."}  # noqa: E501
+        assert _format_goal(b) == "Jazda na rowerze"
+
+    def test_no_target_unknown_activity_returns_empty(self):
+        b = {"target_value": None, "description": "Join this challenge and do something."}
+        assert _format_goal(b) == ""
 
 
 # ---------------------------------------------------------------------------
