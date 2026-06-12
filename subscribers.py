@@ -39,6 +39,23 @@ def save_subscriber_name(chat_id: int, name: str) -> None:
         json.dump(names, f, indent=2, ensure_ascii=False)
 
 
+def remove_subscriber(chat_id: int) -> bool:
+    """Remove chat_id from subscribers and names. Returns True if it was present."""
+    subscribers = load_subscribers()
+    if chat_id not in subscribers:
+        return False
+    subscribers.remove(chat_id)
+    save_subscribers(subscribers)
+
+    names = load_subscriber_names()
+    names.pop(str(chat_id), None)
+    with open(SUBSCRIBER_NAMES_FILE, "w") as f:
+        json.dump(names, f, indent=2, ensure_ascii=False)
+
+    logger.info("Subscriber removed: chat_id=%s (total: %d)", chat_id, len(subscribers))
+    return True
+
+
 def add_subscriber(chat_id: int) -> bool:
     """Add chat_id if not already present. Returns True if newly added."""
     subscribers = load_subscribers()

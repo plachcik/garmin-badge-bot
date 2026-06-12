@@ -23,6 +23,7 @@ from subscribers import (
     add_subscriber,
     load_subscriber_names,
     load_subscribers,
+    remove_subscriber,
     save_subscriber_name,
 )
 
@@ -182,14 +183,29 @@ async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Zapisano! Będziesz otrzymywać powiadomienia o dostępnych odznakach.\n\n"
             "Komendy:\n"
             "/odznaki — sprawdź odznaki teraz\n"
-            "/subscribe lub /dawaj_odznaki — zapisz się na powiadomienia"
+            "/unsubscribe — wypisz się z powiadomień"
         )
     else:
         await update.message.reply_text(
             "👍 Już jesteś zapisany na powiadomienia!\n\n"
             "Komendy:\n"
             "/odznaki — sprawdź odznaki teraz\n"
-            "/subscribe lub /dawaj_odznaki — zapisz się na powiadomienia"
+            "/unsubscribe — wypisz się z powiadomień"
+        )
+
+
+async def cmd_unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    logger.info("Received unsubscribe command from chat_id=%s", chat_id)
+    removed = remove_subscriber(chat_id)
+    if removed:
+        await update.message.reply_text(
+            "👋🏻 Wypisano! Szkoda że nie chcesz już być fitnesiakiem 😒\n\n"
+            "Możesz zapisać się ponownie używając /dawaj_odznaki."
+        )
+    else:
+        await update.message.reply_text(
+            "ℹ️ Nie jesteś zapisany na powiadomienia."
         )
 
 
@@ -365,6 +381,7 @@ def main():
     app.add_handler(CommandHandler("subscribe", cmd_subscribe))
     app.add_handler(CommandHandler("dawaj_odznaki", cmd_subscribe))
     app.add_handler(CommandHandler("odznaki", cmd_check))
+    app.add_handler(CommandHandler("unsubscribe", cmd_unsubscribe))
     app.add_handler(CommandHandler("show_subscribers", cmd_show_subscribers))
     app.add_handler(MessageHandler(filters.ALL, debug_handler))
 

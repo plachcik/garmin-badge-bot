@@ -82,5 +82,5 @@ def fetch_today_special_badges(target_date: date | None = None) -> list[dict]:
         if same_day and is_today:
             result.append(b)
 
-    logger.info("Today-special badges: %d", len(result))
+    logger.info("Single-day badges for %s: %d", target.isoformat(), len(result))
     return result
