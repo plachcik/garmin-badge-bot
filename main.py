@@ -16,7 +16,7 @@ from message_builder import (
     today_special_header,
     weekly_digest_header,
 )
-from subscribers import add_subscriber, load_subscribers
+from subscribers import add_subscriber, load_subscribers, save_subscriber_name
 
 load_dotenv()
 
@@ -147,6 +147,11 @@ async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Received subscribe command from chat_id=%s", chat_id)
     newly_added = add_subscriber(chat_id)
     if newly_added:
+        chat = await context.bot.get_chat(chat_id)
+        display = chat.title or chat.full_name or str(chat_id)
+        if chat.username:
+            display = f"{display} (@{chat.username})"
+        save_subscriber_name(chat_id, display)
         logger.info("Subscribed new chat_id=%s to scheduled digests", chat_id)
         await update.message.reply_text(
             "✅ Zapisano! Będziesz otrzymywać powiadomienia o dostępnych odznakach.\n\n"
@@ -267,6 +272,7 @@ def main():
                     if chat.username:
                         display = f"{display} (@{chat.username})"
                     logger.info("  • %s (id=%s)", display, chat_id)
+                    save_subscriber_name(chat_id, display)
                 except Exception as e:
                     logger.info("  • [unknown] (id=%s) — %s", chat_id, e)
         else:
