@@ -15,56 +15,6 @@ The bot is already live and running in Telegram — find it at [@GarminBadgeBot]
 
 To receive scheduled digests, anyone in the chat needs to send `/subscribe` or `/dawaj_odznaki` once. Works in both private chats and group chats.
 
----
-
-## How to make this bot your own
-
-If you want to run your own instance:
-
-### 1. Clone the repo and install dependencies
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Create a Telegram bot
-
-Message [@BotFather](https://t.me/BotFather), send `/newbot`, and copy the token.
-
-### 3. Set environment variables
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Description |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
-| `ADMIN_TELEGRAM_CHAT_ID` | Your Telegram user ID — receives error alerts (get it from [@userinfobot](https://t.me/userinfobot)) |
-
-No Garmin account or credentials needed — badge data is fetched from the public [garminbadges.com](https://garminbadges.com) API.
-
-### 4. Run
-
-```bash
-python main.py
-```
-
-### 5. Deploy to Railway
-
-Push to GitHub, create a Railway project linked to your repo, add the environment variables, and mount a volume at `/app/data` with `DATA_DIR=/app/data`.
-
-#### Optional environment variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `DATA_DIR` | `.` | Directory for persistent files. Set to `/app/data` on Railway with a volume mounted there. |
-| `DAILY_HOUR` | `8` | Hour (UTC) when scheduled checks run |
-| `DAILY_MINUTE` | `0` | Minute when scheduled checks run |
-| `WEEKLY_EVERY_DAY` | `false` | Set to `true` to run the weekly digest every day instead of Mondays only |
-
 ## Scheduled messages
 
 ### Weekly digest — every Monday at 8:00 UTC
@@ -93,5 +43,5 @@ Fires only when there are badges whose start and end date share the same calenda
 
 • Independence Run ⭐️
   🎯 5 km (łącznie)
-  ⏰ Tylko dziś!!
+  ⏰ Tylko dziś!! Rusz dupę!!
 ```
