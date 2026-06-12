@@ -13,6 +13,7 @@ from message_builder import (
     badge_caption,
     badge_image_url,
     build_daily_message,
+    build_today_special_message,
     today_special_header,
     weekly_digest_header,
 )
@@ -37,6 +38,7 @@ ADMIN_TELEGRAM_CHAT_ID = int(os.environ["ADMIN_TELEGRAM_CHAT_ID"])
 DAILY_HOUR = int(os.getenv("DAILY_HOUR", "8"))
 DAILY_MINUTE = int(os.getenv("DAILY_MINUTE", "0"))
 WEEKLY_EVERY_DAY = os.getenv("WEEKLY_EVERY_DAY", "false").lower() == "true"
+SHOW_BADGE_IMAGE = os.getenv("SHOW_BADGE_IMAGE", "false").lower() == "true"
 _POLAND_TZ = ZoneInfo("Europe/Warsaw")
 
 
@@ -117,10 +119,10 @@ async def send_weekly_digest(app: Application):
     try:
         data = fetch_badge_updates()
         available = data.get("available_challenges", [])
-        if not available:
-            await _broadcast(app, build_daily_message(data))
-        else:
+        if SHOW_BADGE_IMAGE and available:
             await _broadcast_badges(app, weekly_digest_header(), available)
+        else:
+            await _broadcast(app, build_daily_message(data))
         logger.info("Weekly digest sent.")
     except Exception as e:
         logger.error("Failed to send weekly digest: %s", e)
@@ -135,7 +137,10 @@ async def send_today_special(app: Application):
         if not badges:
             logger.info("No today-special badges for today.")
             return
-        await _broadcast_badges(app, today_special_header(), badges, today_only=True)
+        if SHOW_BADGE_IMAGE:
+            await _broadcast_badges(app, today_special_header(), badges, today_only=True)
+        else:
+            await _broadcast(app, build_today_special_message(badges))
         logger.info("Today-special message sent (%d badge(s)).", len(badges))
     except Exception as e:
         logger.error("Failed to send today-special badges: %s", e)
@@ -189,12 +194,7 @@ async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         data = fetch_badge_updates()
         available = data.get("available_challenges", [])
-        if not available:
-            await send_long_message(
-                update.message.reply_text,
-                build_daily_message(data, header="👋🏻 *Dostępne odznaki w tym tygodniu:*"),
-            )
-        else:
+        if SHOW_BADGE_IMAGE and available:
             await update.message.reply_text(
                 weekly_digest_header("👋🏻 *Dostępne odznaki w tym tygodniu:*"),
                 parse_mode="MarkdownV2",
@@ -212,23 +212,34 @@ async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await update.message.reply_text(caption, parse_mode="MarkdownV2")
                 except Exception:
                     await update.message.reply_text(caption, parse_mode="MarkdownV2")
+        else:
+            await send_long_message(
+                update.message.reply_text,
+                build_daily_message(data, header="👋🏻 *Dostępne odznaki w tym tygodniu:*"),
+            )
 
         today_badges = fetch_today_special_badges()
         if today_badges:
-            await update.message.reply_text(today_special_header(), parse_mode="MarkdownV2")
-            for badge in today_badges:
-                caption = badge_caption(badge, today_only=True)
-                url = badge_image_url(badge)
-                try:
-                    if url:
-                        await context.bot.send_photo(
-                            chat_id=update.effective_chat.id, photo=url,
-                            caption=caption, parse_mode="MarkdownV2",
-                        )
-                    else:
+            if SHOW_BADGE_IMAGE:
+                await update.message.reply_text(today_special_header(), parse_mode="MarkdownV2")
+                for badge in today_badges:
+                    caption = badge_caption(badge, today_only=True)
+                    url = badge_image_url(badge)
+                    try:
+                        if url:
+                            await context.bot.send_photo(
+                                chat_id=update.effective_chat.id, photo=url,
+                                caption=caption, parse_mode="MarkdownV2",
+                            )
+                        else:
+                            await update.message.reply_text(caption, parse_mode="MarkdownV2")
+                    except Exception:
                         await update.message.reply_text(caption, parse_mode="MarkdownV2")
-                except Exception:
-                    await update.message.reply_text(caption, parse_mode="MarkdownV2")
+            else:
+                await send_long_message(
+                    update.message.reply_text,
+                    build_today_special_message(today_badges),
+                )
     except Exception as e:
         logger.error("cmd_check error: %s", e)
         await update.message.reply_text(f"⚠️ Error: {e}")
