@@ -177,6 +177,8 @@ async def debug_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Received update: %s", update)
     if not update.message or not update.message.text:
         return
+    if update.effective_chat.type != "private":
+        return
     user = update.effective_user
     name = user.full_name or str(user.id)
     username = f" (@{user.username})" if user.username else ""
