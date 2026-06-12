@@ -27,7 +27,7 @@ def _format_date_pl(date_str: str | None) -> str:
 
 
 def _format_goal(badge: dict) -> str:
-    """Return a formatted goal string like '100,000 steps (łącznie)' or '' if no target."""
+    """Return a formatted goal string like '100,000 kroków (łącznie)' or '' if no target."""
     target_str = badge.get("target_value")
     if not target_str:
         return ""
@@ -35,7 +35,7 @@ def _format_goal(badge: dict) -> str:
     desc = (badge.get("description") or "").lower()
 
     if "step" in desc:
-        formatted = f"{int(target):,} steps"
+        formatted = f"{int(target):,} kroków"
     elif "calorie" in desc or "kcal" in desc:
         formatted = f"{int(target):,} kcal"
     elif ("hour" in desc or "time" in desc) and target >= 3600:
