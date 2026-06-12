@@ -1,33 +1,13 @@
 from datetime import date, datetime
 
-# badgeUnitId → (label, conversion_fn)
-UNIT_MAP = {
-    1: ("m",  lambda v: f"{v/1000:.0f} km"),
-    2: ("m",  lambda v: f"{v:.0f} m" if v < 1000 else f"{v/1000:.1f} km"),
-    3: ("x",  lambda v: f"{v:.0f}×"),
-    5: ("steps", lambda v: f"{v:,.0f} steps"),
-    7: ("sec", lambda v: f"{v/3600:.0f} h"),
-    11: ("likes", lambda v: f"{v:.0f} likes"),
-}
-
 DIFFICULTY_STARS = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐"}
 
-ASSOC_TYPE_LABEL = {
-    "activityId": "jedna aktywność",
-    "none": "łącznie",
-}
+IMAGE_BASE_URL = "https://api.garminbadges.com/storage/badges/"
 
 
-def _format_target(badge: dict) -> str:
-    target = badge.get("badgeTargetValue")
-    unit_id = badge.get("badgeUnitId")
-    if target is None:
-        return ""
-    if unit_id in UNIT_MAP:
-        _, fmt = UNIT_MAP[unit_id]
-        return fmt(target)
-    return str(target)
-
+def badge_image_url(badge: dict) -> str | None:
+    image_path = badge.get("image_path")
+    return f"{IMAGE_BASE_URL}{image_path}" if image_path else None
 
 _MONTHS_PL = [
     "", "stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca",
@@ -40,38 +20,67 @@ def _format_date_pl(date_str: str | None) -> str:
     if not date_str:
         return ""
     try:
-        dt = datetime.fromisoformat(date_str)
+        dt = datetime.fromisoformat(date_str[:19])
         return f"{dt.day} {_MONTHS_PL[dt.month]}"
     except Exception:
         return date_str or ""
 
 
-def _badge_line(badge: dict) -> str:
-    name = badge.get("badgeName", "Unknown")
-    difficulty = DIFFICULTY_STARS.get(badge.get("badgeDifficultyId", 1), "")
-    target = _format_target(badge)
-    assoc = ASSOC_TYPE_LABEL.get(badge.get("badgeAssocType", ""), "")
-    start_fmt = _format_date_pl(badge.get("badgeStartDate"))
-    end_fmt = _format_date_pl(badge.get("badgeEndDate"))
+def _format_goal(badge: dict) -> str:
+    """Return a formatted goal string like '100,000 steps (łącznie)' or '' if no target."""
+    target_str = badge.get("target_value")
+    if not target_str:
+        return ""
+    target = float(target_str)
+    desc = (badge.get("description") or "").lower()
 
-    # Build "what to do" line
-    what = []
-    if target:
-        what.append(target)
-    if assoc:
-        what.append(f"({assoc})")
+    if "step" in desc:
+        formatted = f"{int(target):,} steps"
+    elif "calorie" in desc or "kcal" in desc:
+        formatted = f"{int(target):,} kcal"
+    elif ("hour" in desc or "time" in desc) and target >= 3600:
+        hours = target / 3600
+        formatted = f"{hours:.0f} h" if hours == int(hours) else f"{hours:.1f} h"
+    elif "kilometer" in desc:
+        formatted = f"{int(target / 1000)} km" if target >= 1000 else f"{int(target)} km"
+    elif "meter" in desc:
+        formatted = f"{target / 1000:.0f} km" if target >= 1000 else f"{int(target)} m"
+    else:
+        formatted = (
+            str(int(target)) if target == int(target) else target_str.rstrip("0").rstrip(".")
+        )
+
+    assoc = (
+        "jedna aktywność" if " activity" in desc and "activities" not in desc else "łącznie"
+    )
+
+    return f"{formatted} ({assoc})"
+
+
+def _badge_line(badge: dict) -> str:
+    name = badge.get("name", "Unknown")
+    difficulty = DIFFICULTY_STARS.get(badge.get("difficulty_id", 1), "")
+    goal = _format_goal(badge)
+    start_fmt = _format_date_pl(badge.get("start_date"))
+    end_fmt = _format_date_pl(badge.get("end_date"))
 
     line = f"• *{_e(name)}* {difficulty}\n"
-    if what:
-        line += f"  🎯 {_e(' '.join(what))}\n"
+    if goal:
+        line += f"  🎯 {_e(goal)}\n"
     if start_fmt and end_fmt:
         try:
-            start_dt = datetime.fromisoformat(badge["badgeStartDate"]).date()
-            started = start_dt < date.today()
+            start_dt = datetime.fromisoformat(badge["start_date"][:19]).date()
+            end_dt = datetime.fromisoformat(badge["end_date"][:19]).date()
+            same_day = start_dt.month == end_dt.month and start_dt.day == end_dt.day
         except Exception:
-            started = False
-        verb = "Wyzwanie zaczęło się" if started else "Wyzwanie zaczyna się"
-        line += f"  ⏰ {_e(f'{verb} {start_fmt} a kończy {end_fmt}')}\n"
+            same_day = False
+            start_dt = None
+        if same_day:
+            line += f"  ⏰ {_e(f'Wyzwanie tylko {end_fmt}!')}\n"
+        else:
+            started = start_dt is not None and start_dt < date.today()
+            verb = "Wyzwanie zaczęło się" if started else "Wyzwanie zaczyna się"
+            line += f"  ⏰ {_e(f'{verb} {start_fmt} a kończy {end_fmt}')}\n"
     elif end_fmt:
         line += f"  ⏰ {_e(f'Kończy się {end_fmt}')}\n"
     return line
@@ -79,22 +88,50 @@ def _badge_line(badge: dict) -> str:
 
 def _badge_line_today(badge: dict) -> str:
     """Badge line variant for today-only badges — replaces deadline with 'Tylko dziś!!'."""
-    name = badge.get("badgeName", "Unknown")
-    difficulty = DIFFICULTY_STARS.get(badge.get("badgeDifficultyId", 1), "")
-    target = _format_target(badge)
-    assoc = ASSOC_TYPE_LABEL.get(badge.get("badgeAssocType", ""), "")
-
-    what = []
-    if target:
-        what.append(target)
-    if assoc:
-        what.append(f"({assoc})")
+    name = badge.get("name", "Unknown")
+    difficulty = DIFFICULTY_STARS.get(badge.get("difficulty_id", 1), "")
+    goal = _format_goal(badge)
 
     line = f"• *{_e(name)}* {difficulty}\n"
-    if what:
-        line += f"  🎯 {_e(' '.join(what))}\n"
-    line += "  ⏰ Tylko dziś\\!\\!\n"
+    if goal:
+        line += f"  🎯 {_e(goal)}\n"
+    line += "  ⏰ Tylko dziś\\!\\! Rusz dupę\\!\\!\n"
     return line
+
+
+def badge_caption(badge: dict, today_only: bool = False) -> str:
+    """Return a MarkdownV2 caption for a photo message (no bullet point, no indent)."""
+    name = badge.get("name", "Unknown")
+    difficulty = DIFFICULTY_STARS.get(badge.get("difficulty_id", 1), "")
+    goal = _format_goal(badge)
+
+    text = f"*{_e(name)}* {difficulty}\n"
+    if goal:
+        text += f"🎯 {_e(goal)}\n"
+
+    if today_only:
+        text += "⏰ Tylko dziś\\!\\! Rusz dupę\\!\\!\n"
+    else:
+        start_fmt = _format_date_pl(badge.get("start_date"))
+        end_fmt = _format_date_pl(badge.get("end_date"))
+        if start_fmt and end_fmt:
+            try:
+                start_dt = datetime.fromisoformat(badge["start_date"][:19]).date()
+                end_dt = datetime.fromisoformat(badge["end_date"][:19]).date()
+                same_day = start_dt.month == end_dt.month and start_dt.day == end_dt.day
+            except Exception:
+                same_day = False
+                start_dt = None
+            if same_day:
+                text += f"⏰ {_e(f'Wyzwanie tylko {end_fmt}!')}\n"
+            else:
+                started = start_dt is not None and start_dt < date.today()
+                verb = "Wyzwanie zaczęło się" if started else "Wyzwanie zaczyna się"
+                text += f"⏰ {_e(f'{verb} {start_fmt} a kończy {end_fmt}')}\n"
+        elif end_fmt:
+            text += f"⏰ {_e(f'Kończy się {end_fmt}')}\n"
+
+    return text.rstrip("\n")
 
 
 def build_today_special_message(badges: list[dict]) -> str:
@@ -119,19 +156,23 @@ def build_daily_message(data: dict, header: str | None = None) -> str:
         )
 
     lines = [f"{header_line}\n"]
-
-    if available:
-        available_sorted = sorted(
-            available,
-            key=lambda b: b.get("badgeEndDate") or "9999"
-        )
-        # Only add section heading when it's not already in the header
-        if header is None:
-            lines.append("*Dostępne odznaki w tym tygodniu:*\n")
-        for b in available_sorted:
-            lines.append(_badge_line(b))
+    if header is None:
+        lines.append("*Dostępne odznaki w tym tygodniu:*\n")
+    for b in available:
+        lines.append(_badge_line(b))
 
     return "\n".join(lines)
+
+
+def weekly_digest_header(header: str | None = None) -> str:
+    """Header text sent before the badge photo stream."""
+    if header is not None:
+        return header
+    return "👋🏻 *Żeby nie umknęło\\!*\n\n*Dostępne odznaki w tym tygodniu:*"
+
+
+def today_special_header() -> str:
+    return "Żeby nie umknęło 💡\n\n*📅 Dostępne odznaki tylko na dziś:*"
 
 
 def _e(text: str) -> str:

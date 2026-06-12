@@ -8,9 +8,14 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-import garmin_client
 from garmin_client import fetch_badge_updates, fetch_today_special_badges
-from message_builder import build_daily_message, build_today_special_message
+from message_builder import (
+    badge_caption,
+    badge_image_url,
+    build_daily_message,
+    today_special_header,
+    weekly_digest_header,
+)
 from subscribers import add_subscriber, load_subscribers
 
 load_dotenv()
@@ -24,14 +29,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     level=logging.INFO,
 )
-# Suppress httpx request logs — they contain the bot token in the URL
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-GARMIN_EMAIL = os.environ["GARMIN_EMAIL"]
-GARMIN_PASSWORD = os.environ["GARMIN_PASSWORD"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID = int(os.environ["TELEGRAM_CHAT_ID"])
+ADMIN_TELEGRAM_CHAT_ID = int(os.environ["ADMIN_TELEGRAM_CHAT_ID"])
 DAILY_HOUR = int(os.getenv("DAILY_HOUR", "8"))
 DAILY_MINUTE = int(os.getenv("DAILY_MINUTE", "0"))
 WEEKLY_EVERY_DAY = os.getenv("WEEKLY_EVERY_DAY", "false").lower() == "true"
@@ -54,10 +56,10 @@ async def _send_to_chat(app: Application, chat_id: int, text: str) -> None:
 
 
 async def _broadcast(app: Application, text: str) -> None:
-    """Send a message to all subscribers. Falls back to TELEGRAM_CHAT_ID if none registered."""
+    """Send a message to all subscribers. Falls back to ADMIN_TELEGRAM_CHAT_ID if none."""
     subscribers = load_subscribers()
     if not subscribers:
-        subscribers = [TELEGRAM_CHAT_ID]
+        subscribers = [ADMIN_TELEGRAM_CHAT_ID]
     for chat_id in subscribers:
         try:
             await _send_to_chat(app, chat_id, text)
@@ -65,69 +67,79 @@ async def _broadcast(app: Application, text: str) -> None:
             logger.error("Failed to send to chat_id=%s: %s", chat_id, e)
 
 
-_SCREENSHOT_NAMES = [
-    "login_debug.png",
-    "login_after_submit.png",
-    "login_debug_timeout.png",
-    "login_debug_nobutton.png",
-]
-
-
-async def _notify_admin_login_failure(app: Application, error: Exception) -> None:
-    """Send login failure details + any saved screenshots to the admin (TELEGRAM_CHAT_ID)."""
-    msg = f"🔐 Login to Garmin failed\n\n{error}"
-    try:
-        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
-    except Exception as e:
-        logger.error("Failed to send admin failure message: %s", e)
-        return
-
-    for name in _SCREENSHOT_NAMES:
-        path = os.path.join(_DATA_DIR, name)
-        if not os.path.exists(path):
-            continue
+async def _broadcast_badges(
+    app: Application,
+    header: str,
+    badges: list[dict],
+    today_only: bool = False,
+) -> None:
+    """Send header text then one photo-per-badge to all subscribers."""
+    subscribers = load_subscribers() or [ADMIN_TELEGRAM_CHAT_ID]
+    for chat_id in subscribers:
         try:
-            with open(path, "rb") as f:
-                await app.bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=f, caption=name)
-            logger.info("Sent screenshot %s to admin", name)
+            await app.bot.send_message(chat_id=chat_id, text=header, parse_mode="MarkdownV2")
+            for badge in badges:
+                caption = badge_caption(badge, today_only=today_only)
+                url = badge_image_url(badge)
+                try:
+                    if url:
+                        await app.bot.send_photo(
+                            chat_id=chat_id, photo=url,
+                            caption=caption, parse_mode="MarkdownV2",
+                        )
+                    else:
+                        await app.bot.send_message(
+                            chat_id=chat_id, text=caption, parse_mode="MarkdownV2",
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send badge photo to %s: %s — falling back to text", chat_id, e
+                    )
+                    await app.bot.send_message(
+                        chat_id=chat_id, text=caption, parse_mode="MarkdownV2",
+                    )
         except Exception as e:
-            logger.warning("Failed to send screenshot %s: %s", name, e)
+            logger.error("Failed to send to chat_id=%s: %s", chat_id, e)
+
+
+async def _notify_admin_error(app: Application, error: Exception) -> None:
+    """Send an API failure notice to the admin chat (ADMIN_TELEGRAM_CHAT_ID)."""
+    msg = f"⚠️ Garmin badges API error\n\n{error}"
+    try:
+        await app.bot.send_message(chat_id=ADMIN_TELEGRAM_CHAT_ID, text=msg)
+    except Exception as e:
+        logger.error("Failed to send admin error notification: %s", e)
 
 
 async def send_weekly_digest(app: Application):
     """Every Monday at 8 AM — all badges available this week."""
-    garmin_client._refresh_failed = False  # reset so each scheduled run gets a fresh attempt
     logger.info("Running weekly badge digest... [triggered by: scheduler]")
     try:
-        data = fetch_badge_updates(GARMIN_EMAIL, GARMIN_PASSWORD)
-        msg = build_daily_message(data)
-        await _broadcast(app, msg)
+        data = fetch_badge_updates()
+        available = data.get("available_challenges", [])
+        if not available:
+            await _broadcast(app, build_daily_message(data))
+        else:
+            await _broadcast_badges(app, weekly_digest_header(), available)
         logger.info("Weekly digest sent.")
     except Exception as e:
         logger.error("Failed to send weekly digest: %s", e)
-        if garmin_client._refresh_failed:
-            await _notify_admin_login_failure(app, e)
-        else:
-            await _broadcast(app, f"⚠️ Error fetching Garmin badges: {e}")
+        await _notify_admin_error(app, e)
 
 
 async def send_today_special(app: Application):
-    """Every day at 8 AM — badges whose start and end share today's month+day."""
+    """Every day — badges whose start and end share today's month+day."""
     logger.info("Running today-special badge check... [triggered by: scheduler]")
     try:
         badges = fetch_today_special_badges()
         if not badges:
             logger.info("No today-special badges for today.")
             return
-        msg = build_today_special_message(badges)
-        await _broadcast(app, msg)
+        await _broadcast_badges(app, today_special_header(), badges, today_only=True)
         logger.info("Today-special message sent (%d badge(s)).", len(badges))
     except Exception as e:
         logger.error("Failed to send today-special badges: %s", e)
-        if garmin_client._refresh_failed:
-            await _notify_admin_login_failure(app, e)
-        else:
-            await _broadcast(app, f"⚠️ Error fetching today's special badges: {e}")
+        await _notify_admin_error(app, e)
 
 
 async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -168,77 +180,60 @@ async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(
         "Badge check triggered by user: %s (id=%s)", user.username or user.first_name, user.id
     )
-    garmin_client._refresh_failed = False  # always attempt fresh login on manual check
     await update.message.reply_text("⏳ Sprawdzam odznaki\\.\\.\\.", parse_mode="MarkdownV2")
     try:
-        # Weekly badges
-        data = fetch_badge_updates(GARMIN_EMAIL, GARMIN_PASSWORD)
-        msg = build_daily_message(data, header="👋🏻 *Dostępne odznaki w tym tygodniu:*")
-        await send_long_message(update.message.reply_text, msg)
+        data = fetch_badge_updates()
+        available = data.get("available_challenges", [])
+        if not available:
+            await send_long_message(
+                update.message.reply_text,
+                build_daily_message(data, header="👋🏻 *Dostępne odznaki w tym tygodniu:*"),
+            )
+        else:
+            await update.message.reply_text(
+                weekly_digest_header("👋🏻 *Dostępne odznaki w tym tygodniu:*"),
+                parse_mode="MarkdownV2",
+            )
+            for badge in available:
+                caption = badge_caption(badge)
+                url = badge_image_url(badge)
+                try:
+                    if url:
+                        await context.bot.send_photo(
+                            chat_id=update.effective_chat.id, photo=url,
+                            caption=caption, parse_mode="MarkdownV2",
+                        )
+                    else:
+                        await update.message.reply_text(caption, parse_mode="MarkdownV2")
+                except Exception:
+                    await update.message.reply_text(caption, parse_mode="MarkdownV2")
 
-        # Today-special badges — silent if none found
         today_badges = fetch_today_special_badges()
         if today_badges:
-            today_msg = build_today_special_message(today_badges)
-            await send_long_message(update.message.reply_text, today_msg)
+            await update.message.reply_text(today_special_header(), parse_mode="MarkdownV2")
+            for badge in today_badges:
+                caption = badge_caption(badge, today_only=True)
+                url = badge_image_url(badge)
+                try:
+                    if url:
+                        await context.bot.send_photo(
+                            chat_id=update.effective_chat.id, photo=url,
+                            caption=caption, parse_mode="MarkdownV2",
+                        )
+                    else:
+                        await update.message.reply_text(caption, parse_mode="MarkdownV2")
+                except Exception:
+                    await update.message.reply_text(caption, parse_mode="MarkdownV2")
     except Exception as e:
         logger.error("cmd_check error: %s", e)
         await update.message.reply_text(f"⚠️ Error: {e}")
-        if garmin_client._refresh_failed:
-            await _notify_admin_login_failure(context.application, e)
-
-
-def _startup_login() -> None:
-    """Ensure a valid Garmin session exists before the bot starts polling."""
-    import concurrent.futures
-
-    from garmin_auth import get_fresh_tokens
-    from garmin_client import TOKEN_FILE, _get, get_session
-
-    # First-time setup: no token file at all
-    if not os.path.exists(TOKEN_FILE):
-        logger.info("No token file found — running first-time Playwright login...")
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                executor.submit(get_fresh_tokens, GARMIN_EMAIL, GARMIN_PASSWORD).result(timeout=120)
-            logger.info("First-time login complete.")
-        except Exception as e:
-            logger.error("First-time login failed: %s", e)
-            return
-
-    # Load the session from the token file
-    try:
-        get_session()
-    except Exception as e:
-        logger.error("Failed to load Garmin session: %s", e)
-        return
-
-    # Probe the API — if the saved token is expired, refresh right now
-    logger.info("Probing Garmin API to verify session...")
-    try:
-        _get("/gc-api/badge-service/badge/available")
-        logger.info("Garmin session is valid ✅")
-    except Exception as e:
-        logger.warning("Session probe failed (%s) — refreshing via Playwright...", e)
-        garmin_client._refresh_failed = False
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                executor.submit(get_fresh_tokens, GARMIN_EMAIL, GARMIN_PASSWORD).result(timeout=120)
-            logger.info("Startup Playwright login complete ✅")
-            # Rebuild the session with the new tokens
-            garmin_client._session = None
-            get_session()
-        except Exception as refresh_err:
-            logger.error("Startup Playwright login failed: %s", refresh_err)
+        await _notify_admin_error(context.application, e)
 
 
 def main():
-    _startup_login()
-
     scheduler = AsyncIOScheduler()
 
     async def on_startup(application):
-        # Weekly digest — every Monday at 8 AM UTC (or every day if WEEKLY_EVERY_DAY=true)
         weekly_kwargs = {"hour": DAILY_HOUR, "minute": DAILY_MINUTE}
         if not WEEKLY_EVERY_DAY:
             weekly_kwargs["day_of_week"] = "mon"
@@ -250,7 +245,6 @@ def main():
             DAILY_HOUR, DAILY_MINUTE, ph, pm,
         )
 
-        # Today-special check — 1 minute after weekly digest to avoid overlap
         special_minute = (DAILY_MINUTE + 1) % 60
         special_hour = DAILY_HOUR + (1 if DAILY_MINUTE == 59 else 0)
         scheduler.add_job(
@@ -263,7 +257,6 @@ def main():
 
         scheduler.start()
 
-        # Log all current subscribers with their display names
         subscribers = load_subscribers()
         if subscribers:
             logger.info("Subscribers (%d):", len(subscribers))
@@ -273,12 +266,14 @@ def main():
                     display = chat.title or chat.full_name or str(chat_id)
                     if chat.username:
                         display = f"{display} (@{chat.username})"
-                    name = display
-                    logger.info("  • %s (id=%s)", name, chat_id)
+                    logger.info("  • %s (id=%s)", display, chat_id)
                 except Exception as e:
                     logger.info("  • [unknown] (id=%s) — %s", chat_id, e)
         else:
-            logger.info("No subscribers yet — will fall back to TELEGRAM_CHAT_ID=%s", TELEGRAM_CHAT_ID)
+            logger.info(
+                "No subscribers yet — will fall back to ADMIN_TELEGRAM_CHAT_ID=%s",
+                ADMIN_TELEGRAM_CHAT_ID,
+            )
 
         ph, pm = _utc_to_poland(DAILY_HOUR, DAILY_MINUTE)
         sph, spm = _utc_to_poland(special_hour, special_minute)

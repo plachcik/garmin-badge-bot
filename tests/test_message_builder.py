@@ -6,7 +6,7 @@ from message_builder import (
     _badge_line,
     _e,
     _format_date_pl,
-    _format_target,
+    _format_goal,
     build_daily_message,
     build_today_special_message,
 )
@@ -41,49 +41,7 @@ class TestEscape:
         assert _e("") == ""
 
     def test_polish_chars_untouched(self):
-        # Polish diacritics have no special meaning in MarkdownV2
         assert _e("ąęśćżźółń") == "ąęśćżźółń"
-
-
-# ---------------------------------------------------------------------------
-# _format_target — unit conversion
-# ---------------------------------------------------------------------------
-
-class TestFormatTarget:
-    def test_distance_meters_to_km(self):
-        badge = {"badgeTargetValue": 10000, "badgeUnitId": 1}
-        assert _format_target(badge) == "10 km"
-
-    def test_elevation_small(self):
-        badge = {"badgeTargetValue": 500, "badgeUnitId": 2}
-        assert _format_target(badge) == "500 m"
-
-    def test_elevation_large(self):
-        badge = {"badgeTargetValue": 2500, "badgeUnitId": 2}
-        assert _format_target(badge) == "2.5 km"
-
-    def test_repetitions(self):
-        badge = {"badgeTargetValue": 5, "badgeUnitId": 3}
-        assert _format_target(badge) == "5×"
-
-    def test_steps(self):
-        badge = {"badgeTargetValue": 10000, "badgeUnitId": 5}
-        assert _format_target(badge) == "10,000 steps"
-
-    def test_duration_hours(self):
-        badge = {"badgeTargetValue": 7200, "badgeUnitId": 7}
-        assert _format_target(badge) == "2 h"
-
-    def test_unknown_unit_returns_raw(self):
-        badge = {"badgeTargetValue": 42, "badgeUnitId": 99}
-        assert _format_target(badge) == "42"
-
-    def test_no_target_returns_empty(self):
-        assert _format_target({}) == ""
-
-    def test_no_unit_returns_raw(self):
-        badge = {"badgeTargetValue": 7}
-        assert _format_target(badge) == "7"
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +59,7 @@ class TestFormatDatePl:
         assert _format_date_pl("2024-12-31T23:59:59") == "31 grudnia"
 
     def test_with_microseconds(self):
-        assert _format_date_pl("2026-06-12T00:00:00.0") == "12 czerwca"
+        assert _format_date_pl("2026-06-12T00:00:00.000000Z") == "12 czerwca"
 
     def test_none_returns_empty(self):
         assert _format_date_pl(None) == ""
@@ -120,62 +78,120 @@ class TestFormatDatePl:
 class TestBadgeLine:
     def _badge(self, **kwargs):
         defaults = {
-            "badgeName": "Test Badge",
-            "badgeDifficultyId": 1,
-            "badgeTargetValue": 5000,
-            "badgeUnitId": 1,
-            "badgeStartDate": "2026-06-12T00:00:00.0",
-            "badgeEndDate": "2026-06-14T23:59:59.0",
-            "badgeAssocType": "none",
+            "name": "Test Badge",
+            "difficulty_id": 1,
+            "description": "Record a 5 km run.",
+            "start_date": "2026-06-12T00:00:00.000000Z",
+            "end_date": "2026-06-14T23:59:59.000000Z",
         }
         defaults.update(kwargs)
         return defaults
 
     def test_name_appears_bold(self):
-        line = _badge_line(self._badge(badgeName="My Badge"))
+        line = _badge_line(self._badge(name="My Badge"))
         assert "*My Badge*" in line
 
     def test_difficulty_stars_1(self):
-        line = _badge_line(self._badge(badgeDifficultyId=1))
+        line = _badge_line(self._badge(difficulty_id=1))
         assert DIFFICULTY_STARS[1] in line
 
     def test_difficulty_stars_3(self):
-        line = _badge_line(self._badge(badgeDifficultyId=3))
+        line = _badge_line(self._badge(difficulty_id=3))
         assert DIFFICULTY_STARS[3] in line
 
-    def test_target_rendered(self):
-        line = _badge_line(self._badge(badgeTargetValue=5000, badgeUnitId=1))
-        assert "5 km" in line
+    def test_goal_rendered(self):
+        badge = self._badge()
+        badge["target_value"] = "1000.00"
+        badge["description"] = "Record 1,000 meters of swimming activities."
+        line = _badge_line(badge)
+        assert "🎯" in line
+        assert "km" in line
 
     def test_start_and_end_date_rendered(self):
         line = _badge_line(self._badge())
         assert "Wyzwanie zaczyna się 12 czerwca a kończy 14 czerwca" in line
 
+    def test_same_day_shows_tylko(self):
+        badge = self._badge(
+            start_date="2026-06-13T00:00:00.000000Z",
+            end_date="2026-06-13T23:59:59.000000Z",
+        )
+        line = _badge_line(badge)
+        assert "Wyzwanie tylko 13 czerwca" in line
+        assert "zaczyna się" not in line
+        assert "kończy" not in line
+
     def test_only_end_date_rendered_when_no_start(self):
-        badge = self._badge(badgeStartDate=None)
+        badge = self._badge(start_date=None)
         line = _badge_line(badge)
         assert "Kończy się 14 czerwca" in line
         assert "Wyzwanie zaczyna się" not in line
 
     def test_polish_month_name(self):
         badge = self._badge(
-            badgeStartDate="2026-01-01T00:00:00",
-            badgeEndDate="2026-01-03T23:59:59",
+            start_date="2026-01-01T00:00:00",
+            end_date="2026-01-03T23:59:59",
         )
         line = _badge_line(badge)
         assert "stycznia" in line
 
     def test_no_target_skips_goal_line(self):
         badge = self._badge()
-        del badge["badgeTargetValue"]
-        badge["badgeAssocType"] = ""
+        badge["target_value"] = None
         line = _badge_line(badge)
         assert "🎯" not in line
 
     def test_no_dates_skips_deadline(self):
-        badge = self._badge(badgeStartDate=None, badgeEndDate=None)
+        badge = self._badge(start_date=None, end_date=None)
         line = _badge_line(badge)
         assert "⏰" not in line
+
+    def test_past_start_uses_zaczelo_sie(self):
+        badge = self._badge(start_date="2026-01-01T00:00:00")
+        line = _badge_line(badge)
+        assert "Wyzwanie zaczęło się" in line
+
+
+# ---------------------------------------------------------------------------
+# _format_goal
+# ---------------------------------------------------------------------------
+
+class TestFormatGoal:
+    def test_steps(self):
+        b = {"target_value": "100000.00", "description": "Record 100,000 steps in June."}
+        assert _format_goal(b) == "100,000 steps (łącznie)"
+
+    def test_meters_to_km(self):
+        b = {"target_value": "1000.00", "description": "Record 1,000 meters of swimming activities."}  # noqa: E501
+        assert _format_goal(b) == "1 km (łącznie)"
+
+    def test_kilometers(self):
+        b = {
+            "target_value": "100000.00",
+            "description": "Record 100 kilometers of cycling activities.",
+        }
+        assert _format_goal(b) == "100 km (łącznie)"
+
+    def test_hours_from_seconds(self):
+        b = {
+            "target_value": "10800.00",
+            "description": "Record at least 3 hours of cardio activities.",
+        }
+        assert _format_goal(b) == "3 h (łącznie)"
+
+    def test_calories(self):
+        b = {"target_value": "8000.00", "description": "Burn 8,000 active calories in June."}
+        assert _format_goal(b) == "8,000 kcal (łącznie)"
+
+    def test_single_activity(self):
+        b = {"target_value": "10000.00", "description": "Record a 10-kilometer running activity."}
+        assert "(jedna aktywność)" in _format_goal(b)
+
+    def test_no_target_returns_empty(self):
+        assert _format_goal({"target_value": None}) == ""
+
+    def test_missing_target_returns_empty(self):
+        assert _format_goal({}) == ""
 
 
 # ---------------------------------------------------------------------------
@@ -187,13 +203,11 @@ class TestBuildDailyMessage:
         start = datetime.now().isoformat()
         end = (datetime.now() + timedelta(days=days_until_end)).isoformat()
         return {
-            "badgeName": name,
-            "badgeDifficultyId": 2,
-            "badgeTargetValue": 10000,
-            "badgeUnitId": 5,
-            "badgeStartDate": start,
-            "badgeEndDate": end,
-            "badgeAssocType": "none",
+            "name": name,
+            "difficulty_id": 2,
+            "description": "Join this challenge.",
+            "start_date": start,
+            "end_date": end,
         }
 
     def test_empty_data_returns_no_badges_message(self):
@@ -207,24 +221,12 @@ class TestBuildDailyMessage:
         assert "Żeby nie umknęło" in msg
 
     def test_available_section_heading(self):
-        msg = build_daily_message({
-            "available_challenges": [self._available_badge()],
-        })
+        msg = build_daily_message({"available_challenges": [self._available_badge()]})
         assert "Dostępne odznaki w tym tygodniu" in msg
 
     def test_available_badge_name_in_message(self):
-        msg = build_daily_message({
-            "available_challenges": [self._available_badge("Super Badge")],
-        })
+        msg = build_daily_message({"available_challenges": [self._available_badge("Super Badge")]})
         assert "Super Badge" in msg
-
-    def test_available_sorted_by_end_date(self):
-        soon = self._available_badge("Ends Soon", days_until_end=1)
-        later = self._available_badge("Ends Later", days_until_end=5)
-        msg = build_daily_message({
-            "available_challenges": [later, soon],  # intentionally wrong order
-        })
-        assert msg.index("Ends Soon") < msg.index("Ends Later")
 
     def test_multiple_available_badges(self):
         badges = [self._available_badge(f"Badge {i}") for i in range(3)]
@@ -232,12 +234,19 @@ class TestBuildDailyMessage:
         for i in range(3):
             assert f"Badge {i}" in msg
 
+    def test_custom_header_used(self):
+        msg = build_daily_message(
+            {"available_challenges": []},
+            header="👋🏻 *Dostępne odznaki w tym tygodniu:*",
+        )
+        assert "Dostępne odznaki w tym tygodniu" in msg
+        assert "Żeby nie umknęło" not in msg
+
     def test_missing_keys_handled_gracefully(self):
         build_daily_message({"available_challenges": [{}]})
 
     def test_message_is_string(self):
-        msg = build_daily_message({"available_challenges": []})
-        assert isinstance(msg, str)
+        assert isinstance(build_daily_message({"available_challenges": []}), str)
 
 
 # ---------------------------------------------------------------------------
@@ -248,12 +257,10 @@ class TestBuildTodaySpecialMessage:
     def _badge(self, name="Special Badge"):
         end = (datetime.now() + timedelta(hours=12)).isoformat()
         return {
-            "badgeName": name,
-            "badgeDifficultyId": 1,
-            "badgeTargetValue": 5000,
-            "badgeUnitId": 1,
-            "badgeEndDate": end,
-            "badgeAssocType": "none",
+            "name": name,
+            "difficulty_id": 1,
+            "description": "Record an activity today.",
+            "end_date": end,
         }
 
     def test_header_zeby_nie_umknelo(self):
@@ -275,7 +282,6 @@ class TestBuildTodaySpecialMessage:
     def test_tylko_dzis_instead_of_date(self):
         msg = build_today_special_message([self._badge()])
         assert "Tylko dziś" in msg
-        assert "Kończy się" not in msg
 
     def test_badge_name_in_message(self):
         msg = build_today_special_message([self._badge("Rare Badge")])
@@ -292,28 +298,25 @@ class TestBuildTodaySpecialMessage:
 
 
 # ---------------------------------------------------------------------------
-# _badge_line — single-day badges (start == end, e.g. July 4th every year)
+# _badge_line — single-day badges
 # ---------------------------------------------------------------------------
 
 class TestBadgeLineSingleDay:
     def _single_day_badge(self, month=7, day=4, **kwargs):
-        """Badge where start and end share the same calendar day (different years)."""
         defaults = {
-            "badgeName": "Single Day Badge",
-            "badgeDifficultyId": 1,
-            "badgeTargetValue": 5000,
-            "badgeUnitId": 1,
-            "badgeStartDate": f"2019-{month:02d}-{day:02d}T00:00:00.0",
-            "badgeEndDate": f"2026-{month:02d}-{day:02d}T23:59:59.0",
-            "badgeAssocType": "none",
+            "name": "Single Day Badge",
+            "difficulty_id": 1,
+            "description": "Record an activity on this day.",
+            "start_date": f"2019-{month:02d}-{day:02d}T00:00:00",
+            "end_date": f"2026-{month:02d}-{day:02d}T23:59:59",
         }
         defaults.update(kwargs)
         return defaults
 
     def test_same_day_start_and_end_month_match(self):
         badge = self._single_day_badge(month=7, day=4)
-        start = datetime.fromisoformat(badge["badgeStartDate"])
-        end = datetime.fromisoformat(badge["badgeEndDate"])
+        start = datetime.fromisoformat(badge["start_date"])
+        end = datetime.fromisoformat(badge["end_date"])
         assert start.month == end.month
         assert start.day == end.day
 
@@ -323,11 +326,11 @@ class TestBadgeLineSingleDay:
         assert "Single Day Badge" in line
         assert "⏰" in line
 
-    def test_single_day_shows_same_date_twice(self):
-        # start and end are the same calendar day — both should show "4 lipca"
+    def test_single_day_shows_tylko_format(self):
         badge = self._single_day_badge(month=7, day=4)
         line = _badge_line(badge)
-        assert line.count("lipca") == 2
+        assert "Wyzwanie tylko 4 lipca" in line
+        assert line.count("lipca") == 1
 
     def test_single_day_june(self):
         badge = self._single_day_badge(month=6, day=11)
@@ -339,10 +342,8 @@ class TestBadgeLineSingleDay:
         msg = build_today_special_message([badge])
         assert "Tylko dziś" in msg
         assert "Zaczyna się" not in msg
-        assert "Zaczął się" not in msg
 
     def test_today_special_hides_dates(self):
-        # today-special variant never shows the date — just "Tylko dziś!!"
         badge = self._single_day_badge(month=12, day=25)
         msg = build_today_special_message([badge])
         assert "grudnia" not in msg

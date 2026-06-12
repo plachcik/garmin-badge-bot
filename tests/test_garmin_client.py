@@ -1,281 +1,165 @@
-"""Tests for garmin_client.py — state I/O and badge filtering logic."""
-import json
+"""Tests for garmin_client.py — badge filtering logic against the public API."""
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import garmin_client
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _iso(dt: datetime) -> str:
-    return dt.isoformat()
 
 
 def _badge(
     name: str = "Test",
     end_offset_days: int | None = 2,
-    earned: bool = False,
-    badge_id: str = "1",
+    start_offset_days: int | None = None,
+    badge_id: int = 1,
 ) -> dict:
-    """Build a minimal badge dict as returned by the Garmin API."""
+    """Build a minimal badge dict matching the garminbadges.com API shape."""
     now = datetime.now()
-    week_monday = now - timedelta(days=now.weekday())
-    week_monday = week_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    badge: dict = {
-        "badgeName": name,
-        "badgeChallengeId": badge_id,
-        "badgeId": badge_id,
-        "earnedByMe": earned,
-    }
+    week_monday = (now - timedelta(days=now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    b: dict = {"id": badge_id, "name": name, "difficulty_id": 1, "description": "Test desc"}
     if end_offset_days is not None:
-        # End date within current week
-        end_dt = week_monday + timedelta(days=end_offset_days)
-        badge["badgeEndDate"] = _iso(end_dt)
+        b["end_date"] = (week_monday + timedelta(days=end_offset_days)).isoformat()
     else:
-        badge["badgeEndDate"] = None
-    return badge
+        b["end_date"] = None
+    if start_offset_days is not None:
+        b["start_date"] = (week_monday + timedelta(days=start_offset_days)).isoformat()
+    else:
+        b["start_date"] = (now - timedelta(days=1)).isoformat()
+    return b
 
 
 # ---------------------------------------------------------------------------
-# load_state / save_state
-# ---------------------------------------------------------------------------
-
-class TestStateIO:
-    def test_load_returns_defaults_when_no_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(garmin_client, "STATE_FILE", str(tmp_path / "state.json"))
-        state = garmin_client.load_state()
-        assert state == {"earned_badge_ids": [], "notified_challenge_ids": []}
-
-    def test_save_and_reload(self, tmp_path, monkeypatch):
-        path = str(tmp_path / "state.json")
-        monkeypatch.setattr(garmin_client, "STATE_FILE", path)
-        data = {"earned_badge_ids": ["1", "2"], "notified_challenge_ids": ["3"]}
-        garmin_client.save_state(data)
-        assert garmin_client.load_state() == data
-
-    def test_save_writes_valid_json(self, tmp_path, monkeypatch):
-        path = str(tmp_path / "state.json")
-        monkeypatch.setattr(garmin_client, "STATE_FILE", path)
-        garmin_client.save_state({"earned_badge_ids": ["99"], "notified_challenge_ids": []})
-        with open(path) as f:
-            parsed = json.load(f)
-        assert parsed["earned_badge_ids"] == ["99"]
-
-
-# ---------------------------------------------------------------------------
-# fetch_badge_updates — badge filtering logic
+# fetch_badge_updates
 # ---------------------------------------------------------------------------
 
 class TestFetchBadgeUpdates:
-    """
-    These tests patch _get() so no real HTTP calls are made.
-    They verify the week-filtering and earned-filtering logic in fetch_badge_updates().
-    """
+    def _run(self, badges):
+        with patch.object(garmin_client, "_fetch_all", return_value=badges):
+            return garmin_client.fetch_badge_updates()
 
-    def _run(self, available_badges, tmp_path=None, monkeypatch=None):
-        # Redirect state file to a temp location so tests don't clash
-        monkeypatch.setattr(garmin_client, "STATE_FILE", str(tmp_path / "state.json"))
-        # Reset module-level session so get_session() isn't called
-        monkeypatch.setattr(garmin_client, "_session", MagicMock())
+    def test_badge_ending_this_week_included(self):
+        result = self._run([_badge("Good", end_offset_days=2)])
+        assert any(b["name"] == "Good" for b in result["available_challenges"])
 
-        with patch.object(garmin_client, "_get", return_value=available_badges):
-            return garmin_client.fetch_badge_updates("e@mail.com", "pass")
-
-    def test_badge_ending_this_week_included(self, tmp_path, monkeypatch):
-        badges = [_badge("This Week", end_offset_days=2)]
-        result = self._run(badges, tmp_path=tmp_path, monkeypatch=monkeypatch)
-        names = [b["badgeName"] for b in result["available_challenges"]]
-        assert "This Week" in names
-
-    def test_badge_with_null_end_date_excluded(self, tmp_path, monkeypatch):
-        badges = [_badge("No End", end_offset_days=None)]
-        result = self._run(badges, tmp_path=tmp_path, monkeypatch=monkeypatch)
+    def test_badge_with_null_end_date_excluded(self):
+        result = self._run([_badge("No End", end_offset_days=None)])
         assert result["available_challenges"] == []
 
-    def test_already_earned_badge_excluded(self, tmp_path, monkeypatch):
-        badges = [_badge("Earned", end_offset_days=2, earned=True)]
-        result = self._run(badges, tmp_path=tmp_path, monkeypatch=monkeypatch)
+    def test_badge_ending_after_this_week_excluded(self):
+        far = (datetime.now() + timedelta(days=10)).isoformat()
+        result = self._run([{"id": 1, "name": "Future", "end_date": far, "start_date": far}])
         assert result["available_challenges"] == []
 
-    def test_badge_ending_after_this_week_excluded(self, tmp_path, monkeypatch):
-        # End date is 10 days from now → beyond current Sunday
-        now = datetime.now()
-        far_future = (now + timedelta(days=10)).isoformat()
-        badge = {
-            "badgeName": "Future", "badgeChallengeId": "2",
-            "earnedByMe": False, "badgeEndDate": far_future,
-        }
-        result = self._run([badge], tmp_path=tmp_path, monkeypatch=monkeypatch)
-        assert result["available_challenges"] == []
-
-    def test_badge_ending_before_this_week_excluded(self, tmp_path, monkeypatch):
-        # End date was last week
+    def test_badge_ending_before_this_week_excluded(self):
         past = (datetime.now() - timedelta(days=8)).isoformat()
-        badge = {
-            "badgeName": "Past", "badgeChallengeId": "3",
-            "earnedByMe": False, "badgeEndDate": past,
-        }
-        result = self._run([badge], tmp_path=tmp_path, monkeypatch=monkeypatch)
+        result = self._run([{"id": 1, "name": "Past", "end_date": past, "start_date": past}])
         assert result["available_challenges"] == []
 
-    def test_multiple_badges_filtered_correctly(self, tmp_path, monkeypatch):
+    def test_multiple_badges_filtered_correctly(self):
         badges = [
-            _badge("Good", end_offset_days=1, badge_id="1"),
-            _badge("No End", end_offset_days=None, badge_id="2"),
-            _badge("Earned", end_offset_days=2, earned=True, badge_id="3"),
+            _badge("Good", end_offset_days=1, badge_id=1),
+            _badge("No End", end_offset_days=None, badge_id=2),
         ]
-        result = self._run(badges, tmp_path=tmp_path, monkeypatch=monkeypatch)
+        result = self._run(badges)
         assert len(result["available_challenges"]) == 1
-        assert result["available_challenges"][0]["badgeName"] == "Good"
+        assert result["available_challenges"][0]["name"] == "Good"
 
-    def test_empty_response_returns_empty_list(self, tmp_path, monkeypatch):
-        result = self._run([], tmp_path=tmp_path, monkeypatch=monkeypatch)
+    def test_sorted_by_end_date(self):
+        soon = _badge("Soon", end_offset_days=1, badge_id=1)
+        later = _badge("Later", end_offset_days=3, badge_id=2)
+        result = self._run([later, soon])
+        names = [b["name"] for b in result["available_challenges"]]
+        assert names.index("Soon") < names.index("Later")
+
+    def test_empty_response_returns_empty_list(self):
+        result = self._run([])
         assert result == {"available_challenges": []}
 
-    def test_api_failure_returns_empty_available(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(garmin_client, "STATE_FILE", str(tmp_path / "state.json"))
-        monkeypatch.setattr(garmin_client, "_session", MagicMock())
-
-        def boom(path):
-            if "available" in path:
-                raise RuntimeError("network error")
-            return []
-
-        with patch.object(garmin_client, "_get", side_effect=boom):
-            result = garmin_client.fetch_badge_updates("e@mail.com", "pass")
-
+    def test_premium_badge_excluded(self):
+        badge = _badge("Premium", end_offset_days=2)
+        badge["premium"] = True
+        result = self._run([badge])
         assert result["available_challenges"] == []
+
+    def test_non_premium_badge_included(self):
+        badge = _badge("Free", end_offset_days=2)
+        badge["premium"] = False
+        result = self._run([badge])
+        assert len(result["available_challenges"]) == 1
+
+    def test_api_failure_propagates(self):
+        import pytest
+        with (
+            patch.object(garmin_client, "_fetch_all", side_effect=RuntimeError("network")),
+            pytest.raises(RuntimeError),
+        ):
+            garmin_client.fetch_badge_updates()
 
 
 # ---------------------------------------------------------------------------
-# fetch_today_special_badges — same-day-of-year filter
+# fetch_today_special_badges
 # ---------------------------------------------------------------------------
 
 class TestFetchTodaySpecialBadges:
-    """
-    Badges where start month+day == end month+day == today month+day
-    should be returned; everything else should be excluded.
-    """
-
-    def _make_badge(
-        self,
-        start_year: int,
-        end_year: int,
-        month: int,
-        day: int,
-        earned: bool = False,
-        badge_id: str = "1",
-    ) -> dict:
-        start = f"{start_year}-{month:02d}-{day:02d}T00:00:00"
-        end = f"{end_year}-{month:02d}-{day:02d}T23:59:59"
+    def _make(self, start_year, end_year, month, day, badge_id=1):
         return {
-            "badgeName": f"Badge {badge_id}",
-            "badgeId": badge_id,
-            "earnedByMe": earned,
-            "badgeStartDate": start,
-            "badgeEndDate": end,
+            "id": badge_id,
+            "name": f"Badge {badge_id}",
+            "difficulty_id": 1,
+            "description": "desc",
+            "start_date": f"{start_year}-{month:02d}-{day:02d}T00:00:00",
+            "end_date": f"{end_year}-{month:02d}-{day:02d}T23:59:59",
         }
 
-    def _run(self, badges, monkeypatch):
-        monkeypatch.setattr(garmin_client, "_session", MagicMock())
-        with patch.object(garmin_client, "_get", return_value=badges):
+    def _run(self, badges):
+        with patch.object(garmin_client, "_fetch_all", return_value=badges):
             return garmin_client.fetch_today_special_badges()
 
-    def test_matching_badge_returned(self, monkeypatch):
+    def test_matching_badge_returned(self):
         from datetime import date
-        today = date.today()
-        badge = self._make_badge(2019, 2030, today.month, today.day, badge_id="1")
-        result = self._run([badge], monkeypatch)
+        t = date.today()
+        badge = self._make(2019, 2030, t.month, t.day)
+        result = self._run([badge])
         assert len(result) == 1
-        assert result[0]["badgeId"] == "1"
+        assert result[0]["id"] == 1
 
-    def test_different_day_excluded(self, monkeypatch):
+    def test_different_day_excluded(self):
         from datetime import date, timedelta
-        tomorrow = date.today() + timedelta(days=1)
-        badge = self._make_badge(2019, 2030, tomorrow.month, tomorrow.day, badge_id="2")
-        result = self._run([badge], monkeypatch)
+        t = date.today() + timedelta(days=1)
+        badge = self._make(2019, 2030, t.month, t.day)
+        result = self._run([badge])
         assert result == []
 
-    def test_mismatched_start_end_day_excluded(self, monkeypatch):
-        # start=Jan 1, end=Jan 2 → not same day → excluded
+    def test_mismatched_start_end_day_excluded(self):
         badge = {
-            "badgeName": "Mismatch",
-            "badgeId": "3",
-            "earnedByMe": False,
-            "badgeStartDate": "2019-01-01T00:00:00",
-            "badgeEndDate": "2019-01-02T23:59:59",
+            "id": 1, "name": "Mismatch", "difficulty_id": 1, "description": "d",
+            "start_date": "2019-01-01T00:00:00",
+            "end_date": "2019-01-02T23:59:59",
         }
-        result = self._run([badge], monkeypatch)
+        result = self._run([badge])
         assert result == []
 
-    def test_earned_badge_excluded(self, monkeypatch):
+    def test_missing_start_date_excluded(self):
         from datetime import date
-        today = date.today()
-        badge = self._make_badge(2019, 2030, today.month, today.day, earned=True, badge_id="4")
-        result = self._run([badge], monkeypatch)
-        assert result == []
-
-    def test_missing_start_date_excluded(self, monkeypatch):
-        from datetime import date
-        today = date.today()
+        t = date.today()
         badge = {
-            "badgeName": "No Start",
-            "badgeId": "5",
-            "earnedByMe": False,
-            "badgeStartDate": None,
-            "badgeEndDate": f"{today.year}-{today.month:02d}-{today.day:02d}T23:59:59",
+            "id": 1, "name": "No Start", "difficulty_id": 1, "description": "d",
+            "start_date": None,
+            "end_date": f"{t.year}-{t.month:02d}-{t.day:02d}T23:59:59",
         }
-        result = self._run([badge], monkeypatch)
+        result = self._run([badge])
         assert result == []
 
-    def test_empty_response_returns_empty(self, monkeypatch):
-        assert self._run([], monkeypatch) == []
-
-    def test_api_error_returns_empty(self, monkeypatch):
-        monkeypatch.setattr(garmin_client, "_session", MagicMock())
-        with patch.object(garmin_client, "_get", side_effect=RuntimeError("boom")):
-            result = garmin_client.fetch_today_special_badges()
-        assert result == []
-
-    def test_multiple_matching_badges_all_returned(self, monkeypatch):
+    def test_missing_end_date_excluded(self):
         from datetime import date
-        today = date.today()
-        badges = [
-            self._make_badge(2019, 2030, today.month, today.day, badge_id=str(i))
-            for i in range(3)
-        ]
-        result = self._run(badges, monkeypatch)
-        assert len(result) == 3
-
-
-# ---------------------------------------------------------------------------
-# _build_session
-# ---------------------------------------------------------------------------
-
-class TestBuildSession:
-    def test_cookie_header_set(self):
-        token_data = {
-            "cookies": {"JWT_WEB": "abc123", "SESSIONID": "xyz"},
-            "csrf_token": "tok",
+        t = date.today()
+        badge = {
+            "id": 1, "name": "No End", "difficulty_id": 1, "description": "d",
+            "start_date": f"2019-{t.month:02d}-{t.day:02d}T00:00:00",
+            "end_date": None,
         }
-        session = garmin_client._build_session(token_data)
-        assert "JWT_WEB=abc123" in session.headers["Cookie"]
-        assert "SESSIONID=xyz" in session.headers["Cookie"]
+        result = self._run([badge])
+        assert result == []
 
-    def test_csrf_header_set_when_present(self):
-        token_data = {"cookies": {"JWT_WEB": "a"}, "csrf_token": "csrf-value"}
-        session = garmin_client._build_session(token_data)
-        assert session.headers["connect-csrf-token"] == "csrf-value"
-
-    def test_csrf_header_absent_when_missing(self):
-        token_data = {"cookies": {"JWT_WEB": "a"}, "csrf_token": None}
-        session = garmin_client._build_session(token_data)
-        assert "connect-csrf-token" not in session.headers
-
-    def test_user_agent_set(self):
-        token_data = {"cookies": {}, "csrf_token": None}
-        session = garmin_client._build_session(token_data)
-        assert "Mozilla" in session.headers["User-Agent"]
+    def test_empty_response_returns_empty_list(self):
+        assert self._run([]) == []

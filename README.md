@@ -41,10 +41,10 @@ cp .env.example .env
 
 | Variable | Description |
 |---|---|
-| `GARMIN_EMAIL` | Your Garmin Connect email |
-| `GARMIN_PASSWORD` | Your Garmin Connect password |
 | `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
-| `TELEGRAM_CHAT_ID` | Your Telegram user ID (get it from [@userinfobot](https://t.me/userinfobot)) |
+| `ADMIN_TELEGRAM_CHAT_ID` | Your Telegram user ID — receives error alerts (get it from [@userinfobot](https://t.me/userinfobot)) |
+
+No Garmin account or credentials needed — badge data is fetched from the public [garminbadges.com](https://garminbadges.com) API.
 
 ### 4. Run
 
