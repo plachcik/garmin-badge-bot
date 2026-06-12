@@ -17,7 +17,12 @@ from message_builder import (
     today_special_header,
     weekly_digest_header,
 )
-from subscribers import add_subscriber, load_subscribers, save_subscriber_name
+from subscribers import (
+    add_subscriber,
+    load_subscriber_names,
+    load_subscribers,
+    save_subscriber_name,
+)
 
 load_dotenv()
 
@@ -190,6 +195,21 @@ async def debug_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error("Failed to forward user message to admin: %s", e)
 
 
+async def cmd_show_subscribers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != ADMIN_TELEGRAM_CHAT_ID:
+        return
+    subscribers = load_subscribers()
+    names = load_subscriber_names()
+    if not subscribers:
+        await update.message.reply_text("Brak subskrybentów.")
+        return
+    lines = [f"👥 Subskrybenci ({len(subscribers)}):"]
+    for chat_id in subscribers:
+        label = names.get(str(chat_id), str(chat_id))
+        lines.append(f"• {label} (id={chat_id})")
+    await update.message.reply_text("\n".join(lines))
+
+
 async def send_long_message(send_fn, text: str, parse_mode="MarkdownV2"):
     """Split a long message into ≤4096-char chunks and send each."""
     limit = 4000
@@ -330,6 +350,7 @@ def main():
     app.add_handler(CommandHandler("subscribe", cmd_subscribe))
     app.add_handler(CommandHandler("dawaj_odznaki", cmd_subscribe))
     app.add_handler(CommandHandler("odznaki", cmd_check))
+    app.add_handler(CommandHandler("show_subscribers", cmd_show_subscribers))
     app.add_handler(MessageHandler(filters.ALL, debug_handler))
 
     app.run_polling(drop_pending_updates=True)

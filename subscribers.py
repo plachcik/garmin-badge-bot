@@ -21,6 +21,13 @@ def save_subscribers(chat_ids: list[int]) -> None:
         json.dump(chat_ids, f, indent=2)
 
 
+def load_subscriber_names() -> dict:
+    if os.path.exists(SUBSCRIBER_NAMES_FILE):
+        with open(SUBSCRIBER_NAMES_FILE) as f:
+            return json.load(f)
+    return {}
+
+
 def save_subscriber_name(chat_id: int, name: str) -> None:
     """Persist a human-readable name for chat_id into subscriber_names.json."""
     names: dict = {}
