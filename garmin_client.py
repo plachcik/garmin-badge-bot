@@ -54,10 +54,13 @@ def fetch_badge_updates() -> dict:
     return {"available_challenges": available}
 
 
-def fetch_today_special_badges() -> list[dict]:
-    """Return badges where start and end share today's month+day (annual single-day badges)."""
+def fetch_today_special_badges(target_date: date | None = None) -> list[dict]:
+    """Return badges where start and end share target_date's month+day (annual single-day badges).
+
+    Defaults to today. Pass tomorrow's date to preview upcoming single-day badges.
+    """
     badges = _fetch_all()
-    today = date.today()
+    target = target_date or date.today()
 
     result = []
     for b in badges:
@@ -75,7 +78,7 @@ def fetch_today_special_badges() -> list[dict]:
         except Exception:
             continue
         same_day = start_dt.month == end_dt.month and start_dt.day == end_dt.day
-        is_today = start_dt.month == today.month and start_dt.day == today.day
+        is_today = start_dt.month == target.month and start_dt.day == target.day
         if same_day and is_today:
             result.append(b)
 

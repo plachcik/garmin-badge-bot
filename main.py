@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -14,7 +14,9 @@ from message_builder import (
     badge_image_url,
     build_daily_message,
     build_today_special_message,
+    build_tomorrow_special_message,
     today_special_header,
+    tomorrow_special_header,
     weekly_digest_header,
 )
 from subscribers import (
@@ -135,18 +137,31 @@ async def send_weekly_digest(app: Application):
 
 
 async def send_today_special(app: Application):
-    """Every day — badges whose start and end share today's month+day."""
+    """Every day — badges for today and a preview of tomorrow's single-day badges."""
     logger.info("Running today-special badge check... [triggered by: scheduler]")
     try:
         badges = fetch_today_special_badges()
-        if not badges:
-            logger.info("No today-special badges for today.")
-            return
-        if SHOW_BADGE_IMAGE:
-            await _broadcast_badges(app, today_special_header(), badges, today_only=True)
+        if badges:
+            if SHOW_BADGE_IMAGE:
+                await _broadcast_badges(app, today_special_header(), badges, today_only=True)
+            else:
+                await _broadcast(app, build_today_special_message(badges))
+            logger.info("Today-special message sent (%d badge(s)).", len(badges))
         else:
-            await _broadcast(app, build_today_special_message(badges))
-        logger.info("Today-special message sent (%d badge(s)).", len(badges))
+            logger.info("No today-special badges for today.")
+
+        tomorrow = date.today() + timedelta(days=1)
+        tomorrow_badges = fetch_today_special_badges(target_date=tomorrow)
+        if tomorrow_badges:
+            if SHOW_BADGE_IMAGE:
+                await _broadcast_badges(
+                    app, tomorrow_special_header(), tomorrow_badges, today_only=False
+                )
+            else:
+                await _broadcast(app, build_tomorrow_special_message(tomorrow_badges))
+            logger.info("Tomorrow-special message sent (%d badge(s)).", len(tomorrow_badges))
+        else:
+            logger.info("No tomorrow-special badges.")
     except Exception as e:
         logger.error("Failed to send today-special badges: %s", e)
         await _notify_admin_error(app, e)

@@ -116,8 +116,8 @@ def _badge_line(badge: dict) -> str:
     return line
 
 
-def _badge_line_today(badge: dict) -> str:
-    """Badge line variant for today-only badges — replaces deadline with 'Tylko dziś!!'."""
+def _badge_line_today(badge: dict, tomorrow: bool = False) -> str:
+    """Badge line variant for single-day badges."""
     name = badge.get("name", "Unknown")
     difficulty = DIFFICULTY_STARS.get(badge.get("difficulty_id", 1), "")
     goal = _format_goal(badge)
@@ -125,11 +125,11 @@ def _badge_line_today(badge: dict) -> str:
     line = f"• *{_e(name)}* {difficulty}\n"
     if goal:
         line += f"  🎯 {_e(goal)}\n"
-    line += "  ⏰ Tylko dziś\\!\\! Rusz dupę\\!\\!\n"
+    line += "  ⏰ Tylko jutro\\!\\!\n" if tomorrow else "  ⏰ Tylko dziś\\!\\! Rusz dupę\\!\\!\n"
     return line
 
 
-def badge_caption(badge: dict, today_only: bool = False) -> str:
+def badge_caption(badge: dict, today_only: bool = False, tomorrow_only: bool = False) -> str:
     """Return a MarkdownV2 caption for a photo message (no bullet point, no indent)."""
     name = badge.get("name", "Unknown")
     difficulty = DIFFICULTY_STARS.get(badge.get("difficulty_id", 1), "")
@@ -139,7 +139,9 @@ def badge_caption(badge: dict, today_only: bool = False) -> str:
     if goal:
         text += f"🎯 {_e(goal)}\n"
 
-    if today_only:
+    if tomorrow_only:
+        text += "⏰ Tylko jutro\\!\\!\n"
+    elif today_only:
         text += "⏰ Tylko dziś\\!\\! Rusz dupę\\!\\!\n"
     else:
         start_fmt = _format_date_pl(badge.get("start_date"))
@@ -175,6 +177,17 @@ def build_today_special_message(badges: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def build_tomorrow_special_message(badges: list[dict]) -> str:
+    """Message for same-day annual badges available only tomorrow."""
+    lines = [
+        "Jutro nie zapomnij 👀\n",
+        "*📅 Odznaki dostępne tylko jutro:*\n",
+    ]
+    for b in badges:
+        lines.append(_badge_line_today(b, tomorrow=True))
+    return "\n".join(lines)
+
+
 def build_daily_message(data: dict, header: str | None = None) -> str:
     available = data.get("available_challenges", [])
     header_line = header if header is not None else "👋🏻 *Żeby nie umknęło\\!*"
@@ -203,6 +216,10 @@ def weekly_digest_header(header: str | None = None) -> str:
 
 def today_special_header() -> str:
     return "Żeby nie umknęło 💡\n\n*📅 Dostępne odznaki tylko na dziś:*"
+
+
+def tomorrow_special_header() -> str:
+    return "Jutro nie zapomnij 👀\n\n*📅 Odznaki dostępne tylko jutro:*"
 
 
 def _e(text: str) -> str:
