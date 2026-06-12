@@ -121,41 +121,7 @@ async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("odznaki", cmd_check))
-    app.add_handler(MessageHandler(filters.ALL, debug_handler))
-
-    scheduler = AsyncIOScheduler()
-
-    # Weekly digest — every Monday at 8 AM UTC (or every day if WEEKLY_EVERY_DAY=true)
-    weekly_kwargs = {"hour": DAILY_HOUR, "minute": DAILY_MINUTE}
-    if not WEEKLY_EVERY_DAY:
-        weekly_kwargs["day_of_week"] = "mon"
-    scheduler.add_job(send_weekly_digest, trigger="cron", args=[app], **weekly_kwargs)
-    logger.info(
-        "Weekly digest scheduled: %s at %02d:%02d UTC",
-        "every day" if WEEKLY_EVERY_DAY else "Mondays only",
-        DAILY_HOUR, DAILY_MINUTE,
-    )
-
-    # Today-special check — every day at 8 AM UTC (fires only when there are matches)
-    scheduler.add_job(
-        send_today_special,
-        trigger="cron",
-        hour=DAILY_HOUR,
-        minute=DAILY_MINUTE,
-        args=[app],
-    )
-
-    scheduler.start()
-    logger.info(
-        "Scheduler started — today-special check every day %02d:%02d UTC",
-        DAILY_HOUR, DAILY_MINUTE,
-    )
-
-    # Pre-load Garmin session on startup — run Playwright login if no token file yet
+    # Pre-load Garmin session before starting the bot
     from garmin_client import TOKEN_FILE, get_session
     if not os.path.exists(TOKEN_FILE):
         logger.info("No token file found — running first-time Playwright login...")
@@ -168,26 +134,54 @@ def main():
             logger.info("First-time login complete.")
         except Exception as e:
             logger.error("First-time login failed: %s", e)
-            # Send debug screenshot to Telegram so we can see what the login page looked like
-            import asyncio
-            login_error = e
-            screenshot_path = os.path.join(_DATA_DIR, "login_debug.png")
-            if os.path.exists(screenshot_path):
-                async def _send_screenshot():
-                    await app.bot.send_message(
-                        chat_id=TELEGRAM_CHAT_ID,
-                        text=(
-                            f"⚠️ Garmin login failed: {login_error}"
-                            "\n\nScreenshot of login page attached 👇"
-                        ),
-                    )
-                    with open(screenshot_path, "rb") as f:
-                        await app.bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=f)
-                asyncio.get_event_loop().run_until_complete(_send_screenshot())
     try:
         get_session()
     except Exception as e:
         logger.warning("Garmin session pre-load failed: %s", e)
+
+    scheduler = AsyncIOScheduler()
+
+    async def on_startup(application):
+        # Weekly digest — every Monday at 8 AM UTC (or every day if WEEKLY_EVERY_DAY=true)
+        weekly_kwargs = {"hour": DAILY_HOUR, "minute": DAILY_MINUTE}
+        if not WEEKLY_EVERY_DAY:
+            weekly_kwargs["day_of_week"] = "mon"
+        scheduler.add_job(send_weekly_digest, trigger="cron", args=[application], **weekly_kwargs)
+        logger.info(
+            "Weekly digest scheduled: %s at %02d:%02d UTC",
+            "every day" if WEEKLY_EVERY_DAY else "Mondays only",
+            DAILY_HOUR, DAILY_MINUTE,
+        )
+
+        # Today-special check — every day at 8 AM UTC
+        scheduler.add_job(
+            send_today_special,
+            trigger="cron",
+            hour=DAILY_HOUR,
+            minute=DAILY_MINUTE,
+            args=[application],
+        )
+
+        scheduler.start()
+        logger.info(
+            "Scheduler started — today-special check every day %02d:%02d UTC",
+            DAILY_HOUR, DAILY_MINUTE,
+        )
+
+    async def on_shutdown(application):
+        scheduler.shutdown()
+
+    app = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .post_init(on_startup)
+        .post_shutdown(on_shutdown)
+        .build()
+    )
+
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("odznaki", cmd_check))
+    app.add_handler(MessageHandler(filters.ALL, debug_handler))
 
     app.run_polling(drop_pending_updates=True)
 
