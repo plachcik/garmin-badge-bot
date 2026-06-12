@@ -1,5 +1,7 @@
 import logging
 import os
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
@@ -31,6 +33,14 @@ TELEGRAM_CHAT_ID = int(os.environ["TELEGRAM_CHAT_ID"])
 DAILY_HOUR = int(os.getenv("DAILY_HOUR", "8"))
 DAILY_MINUTE = int(os.getenv("DAILY_MINUTE", "0"))
 WEEKLY_EVERY_DAY = os.getenv("WEEKLY_EVERY_DAY", "false").lower() == "true"
+_POLAND_TZ = ZoneInfo("Europe/Warsaw")
+
+
+def _utc_to_poland(hour: int, minute: int) -> tuple[int, int]:
+    """Convert a UTC hour:minute to Europe/Warsaw local time (handles CET/CEST automatically)."""
+    utc_dt = datetime.now(UTC).replace(hour=hour, minute=minute, second=0, microsecond=0)
+    poland_dt = utc_dt.astimezone(_POLAND_TZ)
+    return poland_dt.hour, poland_dt.minute
 
 
 async def _send_to_chat(app: Application, text: str):
@@ -45,7 +55,7 @@ async def _send_to_chat(app: Application, text: str):
 
 async def send_weekly_digest(app: Application):
     """Every Monday at 8 AM — all badges available this week."""
-    logger.info("Running weekly badge digest...")
+    logger.info("Running weekly badge digest... [triggered by: scheduler]")
     try:
         data = fetch_badge_updates(GARMIN_EMAIL, GARMIN_PASSWORD)
         msg = build_daily_message(data)
@@ -61,7 +71,7 @@ async def send_weekly_digest(app: Application):
 
 async def send_today_special(app: Application):
     """Every day at 8 AM — badges whose start and end share today's month+day."""
-    logger.info("Running today-special badge check...")
+    logger.info("Running today-special badge check... [triggered by: scheduler]")
     try:
         badges = fetch_today_special_badges()
         if not badges:
@@ -103,6 +113,10 @@ async def send_long_message(send_fn, text: str, parse_mode="MarkdownV2"):
 
 
 async def cmd_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    logger.info(
+        "Badge check triggered by user: %s (id=%s)", user.username or user.first_name, user.id
+    )
     await update.message.reply_text("⏳ Sprawdzam odznaki\\.\\.\\.", parse_mode="MarkdownV2")
     try:
         # Weekly badges
@@ -147,10 +161,11 @@ def main():
         if not WEEKLY_EVERY_DAY:
             weekly_kwargs["day_of_week"] = "mon"
         scheduler.add_job(send_weekly_digest, trigger="cron", args=[application], **weekly_kwargs)
+        ph, pm = _utc_to_poland(DAILY_HOUR, DAILY_MINUTE)
         logger.info(
-            "Weekly digest scheduled: %s at %02d:%02d UTC",
+            "Weekly digest scheduled: %s at %02d:%02d UTC = %02d:%02d Poland time",
             "every day" if WEEKLY_EVERY_DAY else "Mondays only",
-            DAILY_HOUR, DAILY_MINUTE,
+            DAILY_HOUR, DAILY_MINUTE, ph, pm,
         )
 
         # Today-special check — every day at 8 AM UTC
@@ -163,9 +178,12 @@ def main():
         )
 
         scheduler.start()
+        ph, pm = _utc_to_poland(DAILY_HOUR, DAILY_MINUTE)
         logger.info(
-            "Scheduler started — today-special check every day %02d:%02d UTC",
-            DAILY_HOUR, DAILY_MINUTE,
+            "Scheduler started — weekly digest %s + today-special check every day"
+            " at %02d:%02d UTC = %02d:%02d Poland time",
+            "every day" if WEEKLY_EVERY_DAY else "Mondays only",
+            DAILY_HOUR, DAILY_MINUTE, ph, pm,
         )
 
     async def on_shutdown(application):
