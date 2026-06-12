@@ -175,6 +175,17 @@ async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def debug_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("Received update: %s", update)
+    if not update.message or not update.message.text:
+        return
+    user = update.effective_user
+    name = user.full_name or str(user.id)
+    username = f" (@{user.username})" if user.username else ""
+    text = update.message.text
+    notify = f"💬 Wiadomość od {name}{username}:\n\n{text}"
+    try:
+        await context.bot.send_message(chat_id=ADMIN_TELEGRAM_CHAT_ID, text=notify)
+    except Exception as e:
+        logger.error("Failed to forward user message to admin: %s", e)
 
 
 async def send_long_message(send_fn, text: str, parse_mode="MarkdownV2"):
