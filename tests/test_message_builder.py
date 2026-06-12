@@ -159,7 +159,7 @@ class TestBadgeLine:
 class TestFormatGoal:
     def test_steps(self):
         b = {"target_value": "100000.00", "description": "Record 100,000 steps in June."}
-        assert _format_goal(b) == "100,000 steps (łącznie)"
+        assert _format_goal(b) == "100,000 kroków (łącznie)"
 
     def test_meters_to_km(self):
         b = {"target_value": "1000.00", "description": "Record 1,000 meters of swimming activities."}  # noqa: E501
