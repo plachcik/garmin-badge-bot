@@ -10,6 +10,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 from garmin_client import fetch_badge_updates, fetch_today_special_badges
 from message_builder import build_daily_message, build_today_special_message
+from subscribers import add_subscriber, load_subscribers
 
 load_dotenv()
 
@@ -43,14 +44,24 @@ def _utc_to_poland(hour: int, minute: int) -> tuple[int, int]:
     return poland_dt.hour, poland_dt.minute
 
 
-async def _send_to_chat(app: Application, text: str):
-    """Send a (potentially long) MarkdownV2 message to the configured chat."""
+async def _send_to_chat(app: Application, chat_id: int, text: str) -> None:
+    """Send a (potentially long) MarkdownV2 message to a single chat."""
     limit = 4000
     while text:
         chunk, text = text[:limit], text[limit:]
-        await app.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID, text=chunk, parse_mode="MarkdownV2"
-        )
+        await app.bot.send_message(chat_id=chat_id, text=chunk, parse_mode="MarkdownV2")
+
+
+async def _broadcast(app: Application, text: str) -> None:
+    """Send a message to all subscribers. Falls back to TELEGRAM_CHAT_ID if none registered."""
+    subscribers = load_subscribers()
+    if not subscribers:
+        subscribers = [TELEGRAM_CHAT_ID]
+    for chat_id in subscribers:
+        try:
+            await _send_to_chat(app, chat_id, text)
+        except Exception as e:
+            logger.error("Failed to send to chat_id=%s: %s", chat_id, e)
 
 
 async def send_weekly_digest(app: Application):
@@ -59,14 +70,11 @@ async def send_weekly_digest(app: Application):
     try:
         data = fetch_badge_updates(GARMIN_EMAIL, GARMIN_PASSWORD)
         msg = build_daily_message(data)
-        await _send_to_chat(app, msg)
+        await _broadcast(app, msg)
         logger.info("Weekly digest sent.")
     except Exception as e:
         logger.error("Failed to send weekly digest: %s", e)
-        await app.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=f"⚠️ Error fetching Garmin badges: {e}",
-        )
+        await _broadcast(app, f"⚠️ Error fetching Garmin badges: {e}")
 
 
 async def send_today_special(app: Application):
@@ -78,26 +86,32 @@ async def send_today_special(app: Application):
             logger.info("No today-special badges for today.")
             return
         msg = build_today_special_message(badges)
-        await _send_to_chat(app, msg)
+        await _broadcast(app, msg)
         logger.info("Today-special message sent (%d badge(s)).", len(badges))
     except Exception as e:
         logger.error("Failed to send today-special badges: %s", e)
-        await app.bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=f"⚠️ Error fetching today's special badges: {e}",
-        )
+        await _broadcast(app, f"⚠️ Error fetching today's special badges: {e}")
 
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    logger.info("Received /start from chat_id=%s", chat_id)
-    await update.message.reply_text(
-        f"👋 Garmin Badge Bot is running!\n\n"
-        f"Your chat ID: {chat_id}\n\n"
-        f"Komendy:\n"
-        f"/odznaki — sprawdź odznaki teraz\n"
-        f"/start — pokaż tę wiadomość"
-    )
+    logger.info("Received subscribe command from chat_id=%s", chat_id)
+    newly_added = add_subscriber(chat_id)
+    if newly_added:
+        logger.info("Subscribed new chat_id=%s to scheduled digests", chat_id)
+        await update.message.reply_text(
+            "✅ Zapisano! Będziesz otrzymywać powiadomienia o dostępnych odznakach.\n\n"
+            "Komendy:\n"
+            "/odznaki — sprawdź odznaki teraz\n"
+            "/subscribe lub /dawaj_odznaki — zapisz się na powiadomienia"
+        )
+    else:
+        await update.message.reply_text(
+            "👍 Już jesteś zapisany na powiadomienia!\n\n"
+            "Komendy:\n"
+            "/odznaki — sprawdź odznaki teraz\n"
+            "/subscribe lub /dawaj_odznaki — zapisz się na powiadomienia"
+        )
 
 
 async def debug_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -197,7 +211,9 @@ def main():
         .build()
     )
 
-    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("start", cmd_subscribe))
+    app.add_handler(CommandHandler("subscribe", cmd_subscribe))
+    app.add_handler(CommandHandler("dawaj_odznaki", cmd_subscribe))
     app.add_handler(CommandHandler("odznaki", cmd_check))
     app.add_handler(MessageHandler(filters.ALL, debug_handler))
 

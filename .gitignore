@@ -2,6 +2,7 @@
 .env
 garmin_state.json
 garmin_tokens.json
+subscribers.json
 
 # Debug screenshots produced by garmin_auth.py
 *.png

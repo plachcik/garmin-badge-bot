@@ -8,8 +8,12 @@ The bot is already live and running in Telegram — find it at [@GarminBadgeBot]
 
 | Command | Description |
 |---|---|
-| `/start` | Show help and your chat ID |
+| `/start` | Subscribe to scheduled badge notifications |
+| `/subscribe` | Subscribe to scheduled badge notifications |
+| `/dawaj_odznaki` | Subscribe to scheduled badge notifications |
 | `/odznaki` | Check available badges right now |
+
+To receive scheduled digests, anyone in the chat needs to send `/subscribe` or `/dawaj_odznaki` once. Works in both private chats and group chats.
 
 ---
 
